@@ -71,3 +71,35 @@ export type ReadinessResponse = {
   ready: boolean;
   checks: ReadinessCheck[];
 };
+
+export type UserRole = 'USER' | 'ADMIN';
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  role: UserRole;
+};
+
+export type ApplicationStatus = 'ACTIVE' | 'ARCHIVED';
+
+export type ApplicationResponse = {
+  id: string;
+  name: string;
+  sourceRepository: string;
+  defaultBranch: string;
+  status: ApplicationStatus;
+  currentDeploymentId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DomainStatus = 'PENDING' | 'ACTIVE' | 'FAILED' | 'DISABLED';
+
+export type DomainResponse = {
+  id: string;
+  applicationId: string;
+  hostname: string;
+  isPrimary: boolean;
+  status: DomainStatus;
+  createdAt: string;
+};
