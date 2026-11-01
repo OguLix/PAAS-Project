@@ -1,7 +1,7 @@
 # OguLix PaaS
 
 Custom Platform-as-a-Service built on the existing OguLix IAAS
-environment
+environment.
 
 ## Project status
 
