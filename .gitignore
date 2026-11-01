@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling
+coverage/
+.vitest/
+.turbo/
+*.log
+npm-debug.log*
+
+# Local database and volume data
+.docker/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,3 @@
+# Reserved for the Traefik file-provider route definitions.
+# Route files are generated at runtime from validated deployment metadata.
+# Do not commit generated routes.

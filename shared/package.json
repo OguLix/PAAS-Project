@@ -1,0 +1,18 @@
+{
+  "name": "@ogulix/shared",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

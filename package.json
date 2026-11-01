@@ -1,0 +1,39 @@
+{
+  "name": "ogulix-paas",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OguLix PaaS control plane, worker and dashboard (scaffold)",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "workspaces": [
+    "shared",
+    "backend",
+    "worker",
+    "frontend"
+  ],
+  "scripts": {
+    "build:shared": "tsc -b shared",
+    "typecheck": "tsc -b && npm run typecheck --workspace @ogulix/frontend",
+    "build": "tsc -b && npm run build --workspace @ogulix/frontend",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "tsc -b && vitest run",
+    "dev:backend": "npm run build:shared && npm run dev --workspace @ogulix/backend",
+    "dev:worker": "npm run build:shared && npm run dev --workspace @ogulix/worker",
+    "dev:frontend": "npm run build:shared && npm run dev --workspace @ogulix/frontend",
+    "db:validate": "npm run db:validate --workspace @ogulix/backend",
+    "db:generate": "npm run db:generate --workspace @ogulix/backend"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,15 @@
+# Example fragment only. Do not use as a full tunnel configuration and never
+# commit real hostnames, tokens, account identifiers or tunnel UUIDs.
+#
+# The applied configuration must:
+#   - keep every existing ingress rule unchanged;
+#   - list specific hostnames before any catch-all rule;
+#   - use the Traefik port verified by IAAS, never Apache's port 80.
+ingress:
+  - hostname: paas.ogulix.tech
+    service: http://<SERVER1_PRIVATE_IP>:<VERIFIED_TRAEFIK_PORT>
+
+  - hostname: '*.apps.ogulix.tech'
+    service: http://<SERVER1_PRIVATE_IP>:<VERIFIED_TRAEFIK_PORT>
+
+  - service: http_status:404

@@ -1,0 +1,41 @@
+# Local development services only.
+# This file must never target the IAAS VMs, and it must not be used to
+# provision Server 1, Server 2 or Server 3.
+#
+# Copy the repository .env.example to .env, fill the MARIADB_* values, then:
+#   docker compose -f infrastructure/docker/compose.dev.yml up -d
+name: ogulix-paas-dev
+
+services:
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?set MARIADB_DATABASE in your local .env}
+      MARIADB_USER: ${MARIADB_USER:?set MARIADB_USER in your local .env}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in your local .env}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in your local .env}
+    ports:
+      - '127.0.0.1:3306:3306'
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '127.0.0.1:6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mariadb-data:
