@@ -6,10 +6,20 @@ Frontend is a Next.js + TypeScript application. It is a presentation layer and A
 
 Use the Next.js App Router. Prefer server components for static/data-display composition where appropriate, and client components only for interactive state. Use one agreed API client module rather than scattering `fetch` calls across pages.
 
-The exact UI component library and design system are intentionally not locked by this architecture
-document. Frontend 1 selects them before feature UI work and records the choice here; that decision
-does not block repository scaffolding. Form validation and API validation share the same Zod schemas
-in `shared/`, so the form library may not introduce a second schema dialect.
+### 1.1 Recorded UI decisions (Frontend 1, 2026-11-01)
+
+| Item | Decision | Reason |
+|---|---|---|
+| Component approach | shadcn/ui style primitives: Radix behaviour plus Tailwind classes copied into `components/ui` | No runtime design library to keep current, accessible behaviour from Radix, no extra styling layer |
+| Styling | Tailwind CSS v4 with tokens in `globals.css` under `@theme` | One token source, and components never hold raw hex values |
+| Direction source | `DESIGN.md` at the repository root | Owner-authored palette, typography and dials |
+| Theme | Light only | `DESIGN.md` excludes dark backgrounds, and an unverified second theme is worse than one verified theme |
+| Icons | `lucide-react`, only for functional controls (chevron, sign out) | A decorative icon per feature would be the generic default this project rejects |
+| Navigation placement | Top bar, not a sidebar | The shell has one destination today; a sidebar with one entry reads as empty. Moving `navItems` into a sidebar later is a `topbar.tsx` change |
+
+Form validation and API validation must converge on the same Zod schemas in `shared/` as soon as that
+package carries the corresponding contract. Until then the authentication form schemas live in
+`frontend/src/features/auth/schema.ts` and are expected to match the API rather than define it.
 
 ## 2. Proposed directory structure
 
@@ -67,6 +77,26 @@ frontend/
 
 Keep components focused. A component should not duplicate authorization rules; the backend is authoritative.
 
+### 3.1 Implemented after the shell milestone
+
+The tree in section 2 is the target. These paths exist now; everything else is still unbuilt.
+
+| Path | State |
+|---|---|
+| `app/page.tsx` | Redirects to `/dashboard`; the guard handles anonymous visitors |
+| `app/not-found.tsx` | Styled 404 with a real link back |
+| `app/(auth)/layout.tsx`, `(auth)/login`, `(auth)/register` | Implemented |
+| `app/(dashboard)/layout.tsx`, `(dashboard)/dashboard` | Implemented |
+| `components/ui/` | button, input, label, field, alert, card, skeleton |
+| `components/layout/` | topbar, user-menu, nav-items, dashboard-shell, mock-notice |
+| `components/feedback/` | loading-state, empty-state, error-state |
+| `features/auth/` | schema, login-form, register-form, session-store, session-guard |
+| `services/` | `auth.api.ts`, `auth.types.ts`, `mock/auth.mock.ts` |
+| `applications`, `deployments`, `nodes`, `domains`, `settings` | Not started, Frontend B scope |
+
+`hooks/`, `types/` and `lib/env.ts`, `lib/auth.ts` in the target tree were not needed: shared types come
+from `@ogulix/shared`, and session state is a single module in `features/auth/session-store.ts`.
+
 ## 4. Frontend service and type contracts
 
 - `lib/api-client.ts`: base URL, JSON handling, `credentials: 'include'` cookie session, normalized API errors.
@@ -103,3 +133,73 @@ channel. Stop polling when the deployment reaches a terminal status.
 - No secrets are shipped to the browser.
 - Application and deployment pages enforce ownership through backend responses.
 - UI status labels map exactly to `deployment-state-machine.md`.
+
+## 8. Authentication contract gap
+
+`docs/design/api-contract.md` lists `POST /auth/register`, `POST /auth/login`, `POST /auth/logout` and
+`GET /auth/me`, and fixes the response envelope, but it does not define their request or response
+bodies. The frontend currently assumes:
+
+```ts
+type AuthUser = { id: string; email: string; role: "USER" | "ADMIN" };
+type MeResponse = { user: AuthUser };
+type LoginInput = { email: string; password: string };
+```
+
+Those assumptions are isolated in `services/auth.types.ts` so a single edit corrects every caller.
+Backend 1 owns the final shapes; when they are published, update that file and this section together.
+
+Two behaviours follow from the contract as written and are implemented as such:
+
+- A `401` from `POST /auth/login` means the credentials were rejected, not that a session expired. It
+  gets its own message.
+- A `403 REGISTRATION_CLOSED` from `POST /auth/register` is a normal outcome while `REGISTRATION_MODE`
+  is `closed`, so the form reports it directly instead of a generic failure.
+
+## 9. Mock API
+
+The authentication screens need to be usable before the endpoints exist. `services/auth.api.ts` picks
+between the real client and `services/mock/auth.mock.ts`:
+
+| Situation | Behaviour |
+|---|---|
+| `NEXT_PUBLIC_USE_MOCKS=true` | Mock |
+| `NEXT_PUBLIC_USE_MOCKS=false` | Real API |
+| Unset in development | Mock |
+| Unset in a production build | Real API |
+
+While the mock answers, `components/layout/mock-notice.tsx` renders a visible banner saying the data is
+simulated, and the login page shows the demo credentials. The mock keeps no data in browser storage and
+never claims to be the API. Removing it means deleting `services/mock/`, the flag branch in
+`auth.api.ts`, and this section.
+
+## 10. Session state
+
+`features/auth/session-store.ts` mirrors what `GET /auth/me` reported and exposes it through
+`useSyncExternalStore`. Nothing is written to `localStorage` or `sessionStorage`, and the cookie stays
+unreadable to JavaScript.
+
+`features/auth/session-guard.tsx` keeps anonymous visitors out of the dashboard, and it distinguishes
+three outcomes:
+
+| `GET /auth/me` result | UI |
+|---|---|
+| User | Render the dashboard |
+| `401` or `403` | Redirect to `/login?next=<path>` |
+| Network or server failure | Retryable error state, never a redirect |
+
+The guard is a usability measure. Every protected operation is still authorized by the API.
+
+## 11. Frontend tests
+
+Component tests live beside the feature in `src/features/**/__tests__` and run with the package's own
+runner:
+
+```bash
+npm run test --workspace @ogulix/frontend
+```
+
+Vitest with `jsdom` and Testing Library covers form validation, error mapping and the redirect after a
+successful submit. API calls are mocked at the service module, so no test needs a server or a database.
+The root `npm test` script also runs this suite.
+

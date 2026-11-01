@@ -20,7 +20,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "tsc -b && vitest run",
+    "test": "tsc -b && vitest run && npm run test --workspaces --if-present",
     "dev:backend": "npm run build:shared && npm run dev --workspace @ogulix/backend",
     "dev:worker": "npm run build:shared && npm run dev --workspace @ogulix/worker",
     "dev:frontend": "npm run build:shared && npm run dev --workspace @ogulix/frontend",

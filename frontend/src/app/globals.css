@@ -1,1 +1,44 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
+
+/*
+ * Central design tokens. Components consume these names, never raw hex values.
+ * Source of direction: DESIGN.md at the repository root.
+ */
+@theme {
+  --color-surface: #ffffff;
+  --color-subtle: #f8faf9;
+  --color-accent: #4caf50;
+  --color-accent-strong: #2e7d32;
+  --color-deep: #1b4332;
+  --color-ink: #1f2937;
+  --color-muted: #64748b;
+  --color-line: #e5e7eb;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fef2f2;
+  --color-success-soft: #f0fdf4;
+  --color-warning: #b45309;
+  --color-warning-soft: #fffbeb;
+
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-panel: 0.75rem;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-subtle);
+    color: var(--color-ink);
+  }
+
+  /* Every keyboard focus must be visible. Components may add a ring, never remove this. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent-strong);
+    outline-offset: 2px;
+  }
+}
