@@ -115,6 +115,8 @@ The project is handled by five people: one IAAS/infrastructure member, two front
 - [x] Stack and constrained-MVP architecture documented
 - [x] Design decisions locked and contradictions reconciled in `docs/design/decisions.md`
 - [x] Repository scaffold initialized from `docs/implementation/initialization-blueprint.md` (see `docs/implementation/scaffold-report.md`)
+- [x] Backend 1 initial auth/session, application and domain API with Prisma/MariaDB repositories and generated initial migration
+- [ ] Validate the initial Prisma migration and native enums against a disposable MariaDB 11.4 instance
 - [ ] Server capacity and port preflight (Server 1 memory measured against the 4 GiB budget)
 - [ ] Docker installed on runtime nodes
 - [ ] Control-plane services deployed and measured
