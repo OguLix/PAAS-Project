@@ -7,9 +7,12 @@ import {
   TERMINAL_DEPLOYMENT_STATUSES,
   canTransition,
   createApplicationInputSchema,
+  createDomainInputSchema,
   isDeploymentStatus,
   isNodeCommand,
+  loginInputSchema,
   repositoryUrlSchema,
+  registerInputSchema,
 } from '@ogulix/shared';
 
 describe('deployment status contract', () => {
@@ -91,6 +94,11 @@ describe('repository URL validation', () => {
       repositoryUrlSchema.safeParse('https://user:secret@github.com/ogulix/demo.git').success,
     ).toBe(false);
   });
+  it('rejects an empty user-info delimiter in a repository URL', () => {
+    expect(repositoryUrlSchema.safeParse('https://@github.com/ogulix/demo.git').success).toBe(
+      false,
+    );
+  });
 });
 
 describe('application input contract', () => {
@@ -112,6 +120,30 @@ describe('application input contract', () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('authentication and domain input contracts', () => {
+  it('normalizes email casing and enforces the password length policy', () => {
+    expect(
+      registerInputSchema.parse({ email: '  USER@Example.test ', password: 'password8' }),
+    ).toEqual({ email: 'user@example.test', password: 'password8' });
+    expect(loginInputSchema.safeParse({ email: 'user@example.test', password: '' }).success).toBe(
+      false,
+    );
+    expect(
+      registerInputSchema.safeParse({ email: 'user@example.test', password: 'short' }).success,
+    ).toBe(false);
+  });
+
+  it('accepts only a single hostname below apps.ogulix.tech', () => {
+    expect(createDomainInputSchema.parse({ hostname: 'DEMO.apps.ogulix.tech' })).toEqual({
+      hostname: 'demo.apps.ogulix.tech',
+    });
+    expect(createDomainInputSchema.safeParse({ hostname: 'example.com' }).success).toBe(false);
+    expect(
+      createDomainInputSchema.safeParse({ hostname: 'nested.demo.apps.ogulix.tech' }).success,
+    ).toBe(false);
   });
 });
 

@@ -8,20 +8,29 @@
     "build": "tsc -b",
     "start": "node dist/server.js",
     "typecheck": "tsc -b",
+    "test": "vitest run --config vitest.config.mts",
     "db:validate": "prisma validate --schema prisma/schema.prisma",
     "db:format": "prisma format --schema prisma/schema.prisma",
-    "db:generate": "prisma generate --schema prisma/schema.prisma"
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:migrate:dev": "prisma migrate dev --schema prisma/schema.prisma",
+    "db:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma"
   },
   "dependencies": {
     "@ogulix/shared": "*",
+    "@prisma/adapter-mariadb": "7.10.1",
     "@prisma/client": "^7.10.1",
+    "argon2": "^0.44.0",
     "dotenv": "^18.0.9",
     "express": "^5.3.0",
+    "express-rate-limit": "^7.5.1",
+    "mariadb": "^3.4.5",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/supertest": "^6.0.3",
     "prisma": "7.10.1",
+    "supertest": "^7.1.4",
     "tsx": "^4.23.15"
   }
 }

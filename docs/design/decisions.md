@@ -119,11 +119,9 @@ client:
 - The connection URL lives in `backend/prisma.config.ts`, read from `DATABASE_URL`. The datasource is
   optional there so `prisma validate` works without a database, but migration and introspection
   commands require it.
-- Instantiating `PrismaClient` requires a driver adapter. When the first repository is implemented,
-  add `@prisma/adapter-mariadb` with the `mariadb` driver instead of relying on a URL-only
-  constructor.
-- The scaffold does not instantiate a client, so this is a wiring requirement for the first
-  data-access milestone, not a runtime dependency today.
+- Instantiating `PrismaClient` requires a driver adapter. Backend 1 uses
+  `@prisma/adapter-mariadb` with the `mariadb` driver; it parses the configured `DATABASE_URL` into
+  adapter options rather than relying on a URL-only constructor.
 
 ## 5. Logging
 

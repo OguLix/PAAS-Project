@@ -87,6 +87,39 @@ Admin-only node mutation endpoints are intentionally not specified for the first
 
 ## 4. DTO outline
 
+### Authentication
+
+`POST /auth/register` and `POST /auth/login` accept:
+
+```ts
+type AuthCredentials = {
+  email: string;
+  password: string;
+};
+```
+
+Email is trimmed and normalized to lowercase. Passwords must contain 8-256 characters. Registering
+while `REGISTRATION_MODE=closed` returns `403 REGISTRATION_CLOSED`. Successful registration and
+login both create a server-side session and set the `ogulix_session` cookie; neither response
+contains the opaque token.
+
+`GET /auth/me`, successful login and successful registration return:
+
+```ts
+type AuthUser = {
+  id: string;
+  email: string;
+  role: "USER" | "ADMIN";
+};
+// Wrapped as { data: { user: AuthUser }, meta: { requestId: string } }
+```
+
+`POST /auth/logout` revokes the current session, clears the cookie and returns
+`{ data: { loggedOut: true }, meta: { requestId } }`. Login credential failures return `401
+UNAUTHENTICATED` with the same message regardless of whether the email exists.
+
+### Applications and domains
+
 `CreateApplicationInput`
 ```ts
 type CreateApplicationInput = {
@@ -122,6 +155,25 @@ type ApplicationResponse = {
 };
 ```
 `currentDeploymentId` is derived from the newest deployment in `RUNNING`; it is not stored separately.
+
+Application list responses use the common list envelope and accept `page` (default 1) and `pageSize`
+(default 20, maximum 100). Application create/update requests reject unknown fields; updates must
+include at least one field. Deletion archives the application and preserves its history.
+
+Domain association accepts `{ hostname: string }`. The MVP accepts one DNS label below
+`apps.ogulix.tech` (for example `demo.apps.ogulix.tech`); custom domains and wildcard hostnames are
+not accepted. Hostnames are normalized to lowercase and must be globally unique.
+
+```ts
+type DomainResponse = {
+  id: string;
+  applicationId: string;
+  hostname: string;
+  isPrimary: boolean;
+  status: "PENDING" | "ACTIVE" | "FAILED" | "DISABLED";
+  createdAt: string;
+};
+```
 
 `DeploymentResponse`
 ```ts
@@ -167,6 +219,12 @@ Do not return `imageReference`, `imageDigest`, internal node addresses, secret v
 - `422 Unprocessable Entity`: semantically invalid operation, if adopted consistently.
 - `429 Too Many Requests`: rate limit.
 - `500`: generic internal error with request ID only.
+
+The API allows credentialed CORS only from the configured dashboard origin (`APP_ORIGIN`), with
+`Content-Type` and `Idempotency-Key` as the allowed request headers. All state-changing requests
+must have an `Origin` matching that dashboard origin, or omit `Origin` while supplying
+`Sec-Fetch-Site: same-origin`. A `same-site` fetch is accepted only when its `Origin` matches.
+Requests with a different fetch-site value are rejected with `403 FORBIDDEN`.
 
 ## 6. Frontend integration requirements
 

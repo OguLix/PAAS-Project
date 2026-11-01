@@ -22,10 +22,11 @@ export const repositoryUrlSchema = z
       return;
     }
 
+    const authority = value.slice(value.indexOf('://') + 3).split(/[/?#]/, 1)[0];
     if (parsed.protocol !== 'https:') {
       ctx.addIssue({ code: 'custom', message: 'Only the https protocol is supported' });
     }
-    if (parsed.username.length > 0 || parsed.password.length > 0) {
+    if (parsed.username.length > 0 || parsed.password.length > 0 || authority?.includes('@')) {
       ctx.addIssue({
         code: 'custom',
         message: 'Credentials in the repository URL are not allowed',
@@ -48,13 +49,41 @@ export const commitShaSchema = z
 
 export const applicationNameSchema = z.string().trim().min(1).max(120);
 
-export const createApplicationInputSchema = z.object({
-  name: applicationNameSchema,
-  sourceRepository: repositoryUrlSchema,
-  defaultBranch: branchNameSchema,
-});
+export const createApplicationInputSchema = z
+  .object({
+    name: applicationNameSchema,
+    sourceRepository: repositoryUrlSchema,
+    defaultBranch: branchNameSchema,
+  })
+  .strict();
 
-export const updateApplicationInputSchema = createApplicationInputSchema.partial();
+export const updateApplicationInputSchema = createApplicationInputSchema
+  .partial()
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, 'At least one field must be provided');
+
+export const emailSchema = z
+  .string()
+  .trim()
+  .email()
+  .max(255)
+  .transform((value) => value.toLowerCase());
+
+export const passwordSchema = z.string().min(8).max(256);
+
+export const registerInputSchema = z
+  .object({
+    email: emailSchema,
+    password: passwordSchema,
+  })
+  .strict();
+
+export const loginInputSchema = z
+  .object({
+    email: emailSchema,
+    password: z.string().min(1).max(256),
+  })
+  .strict();
 
 export const deployInputSchema = z.object({
   branch: branchNameSchema.optional(),
@@ -90,15 +119,24 @@ export const resourceLimitsSchema = z.object({
 
 export const domainHostnameSchema = z
   .string()
-  .min(3)
-  .max(253)
+  .trim()
+  .toLowerCase()
   .regex(
-    /^(?=.{3,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/,
-    'Hostname must be a lowercase DNS name',
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.apps\.ogulix\.tech$/,
+    'Hostname must be a single subdomain of apps.ogulix.tech',
   );
+
+export const createDomainInputSchema = z
+  .object({
+    hostname: domainHostnameSchema,
+  })
+  .strict();
 
 export type CreateApplicationInput = z.infer<typeof createApplicationInputSchema>;
 export type UpdateApplicationInput = z.infer<typeof updateApplicationInputSchema>;
+export type RegisterInput = z.infer<typeof registerInputSchema>;
+export type LoginInput = z.infer<typeof loginInputSchema>;
 export type DeployInput = z.infer<typeof deployInputSchema>;
+export type CreateDomainInput = z.infer<typeof createDomainInputSchema>;
 export type EnvironmentVariableInput = z.infer<typeof environmentVariableInputSchema>;
 export type ResourceLimits = z.infer<typeof resourceLimitsSchema>;
