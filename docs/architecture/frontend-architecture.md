@@ -79,7 +79,7 @@ Keep components focused. A component should not duplicate authorization rules; t
 
 ### 3.1 Implemented after the shell milestone
 
-The tree in section 2 is the target. These paths exist now; everything else is still unbuilt.
+The tree in section 2 is the target. Current implementation status:
 
 | Path | State |
 |---|---|
@@ -92,10 +92,19 @@ The tree in section 2 is the target. These paths exist now; everything else is s
 | `components/feedback/` | loading-state, empty-state, error-state |
 | `features/auth/` | schema, login-form, register-form, session-store, session-guard |
 | `services/` | `auth.api.ts`, `auth.types.ts`, `mock/auth.mock.ts` |
-| `applications`, `deployments`, `nodes`, `domains`, `settings` | Not started, Frontend B scope |
+| `app/(dashboard)/applications/` | Application list, create, detail, edit, archive and deployment request |
+| `app/(dashboard)/deployments/` | Deployment status, automatic polling, timestamps and bounded logs |
+| `features/applications/`, `features/deployments/` | Forms, lifecycle status badge, history and monitoring availability state |
+| `services/applications.api.ts`, `services/deployments.api.ts` | Application and deployment API calls through the shared client |
+| `nodes`, `domains`, `settings` | Not started |
 
 `hooks/`, `types/` and `lib/env.ts`, `lib/auth.ts` in the target tree were not needed: shared types come
 from `@ogulix/shared`, and session state is a single module in `features/auth/session-store.ts`.
+
+The application metrics UI intentionally reports that telemetry is unavailable: the current API
+contract defines no application metrics endpoint. Deployment creation/history, deployment detail
+and logs use the documented contract, but those backend routes still need to be implemented before
+the end-to-end lifecycle can work.
 
 ## 4. Frontend service and type contracts
 
@@ -133,6 +142,7 @@ channel. Stop polling when the deployment reaches a terminal status.
 - No secrets are shipped to the browser.
 - Application and deployment pages enforce ownership through backend responses.
 - UI status labels map exactly to `deployment-state-machine.md`.
+- Monitoring never shows fabricated values when a metrics endpoint is unavailable.
 
 ## 8. Authentication contract gap
 
@@ -202,4 +212,3 @@ npm run test --workspace @ogulix/frontend
 Vitest with `jsdom` and Testing Library covers form validation, error mapping and the redirect after a
 successful submit. API calls are mocked at the service module, so no test needs a server or a database.
 The root `npm test` script also runs this suite.
-
