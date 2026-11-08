@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
-import type {
-  ApplicationResponse,
-  CreateApplicationInput,
-  CreateDomainInput,
-  UpdateApplicationInput,
-  AuthUser,
+import {
+  DEFAULT_APPLICATION_CONFIG,
+  type ApplicationResponse,
+  type CreateApplicationInput,
+  type CreateDomainInput,
+  type UpdateApplicationInput,
+  type AuthUser,
 } from '@ogulix/shared';
 import type { AppEnv } from '../src/config/env';
 import { loadEnv } from '../src/config/env';
@@ -126,6 +127,7 @@ class ApiApplicationRepository implements ApplicationRepository {
     const application: ApplicationRecord = {
       id: `app-${this.records.size + 1}`,
       ownerId,
+      ...DEFAULT_APPLICATION_CONFIG,
       ...input,
       status: 'ACTIVE',
       currentDeploymentId: null,
@@ -162,6 +164,13 @@ class ApiApplicationRepository implements ApplicationRepository {
       name: application.name,
       sourceRepository: application.sourceRepository,
       defaultBranch: application.defaultBranch,
+      dockerfilePath: application.dockerfilePath,
+      buildContext: application.buildContext,
+      internalPort: application.internalPort,
+      healthCheckPath: application.healthCheckPath,
+      cpuCores: application.cpuCores,
+      memoryMb: application.memoryMb,
+      pidsLimit: application.pidsLimit,
       status: application.status,
       currentDeploymentId: application.currentDeploymentId,
       createdAt: application.createdAt.toISOString(),
@@ -325,6 +334,15 @@ describe('Backend 1 API', () => {
 
     expect(createdApplication.status).toBe(201);
     expect(createdApplication.body.data.currentDeploymentId).toBeNull();
+    expect(createdApplication.body.data).toMatchObject({
+      dockerfilePath: 'Dockerfile',
+      buildContext: '.',
+      internalPort: 3000,
+      healthCheckPath: '/',
+      cpuCores: 0.5,
+      memoryMb: 512,
+      pidsLimit: 100,
+    });
 
     const currentUser = await request(app).get('/api/v1/auth/me').set('Cookie', sessionCookie(1));
     expect(currentUser.status).toBe(200);

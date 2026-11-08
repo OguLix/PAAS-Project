@@ -37,7 +37,8 @@ This list mirrors `api-contract.md`. If the two ever disagree, the contract wins
   GET      `/deployments/:deploymentId`                Deployment status/details
   POST     `/deployments/:deploymentId/cancel`         Cancel a queued deployment
   POST     `/deployments/:deploymentId/stop`           Stop a running deployment
-  POST     `/deployments/:deploymentId/restart`        Ensure the container is running
+  POST     `/deployments/:deploymentId/restart`        Create a new deployment attempt
+  GET      `/deployments/:deploymentId/logs`           Bounded, redacted deployment logs
   GET      `/applications/:applicationId/logs`        Bounded, redacted build logs
   GET      `/nodes`                                    List runtime nodes
   GET      `/applications/:applicationId/domains`      List application domains
@@ -69,9 +70,11 @@ application. Knowing an ID must never grant access.
 creates a deployment record and queues work. It should return
 `202 Accepted` with the deployment ID and initial state.
 
-Repeated requests should not accidentally create duplicate releases. Use
-an idempotency key or request fingerprint for deployment creation where
-appropriate.
+Repeated requests must not create duplicate releases. Deployment creation requires an
+`Idempotency-Key` plus a request fingerprint; the same key with a different payload returns
+`409 IDEMPOTENCY_CONFLICT`. A restart creates a new deployment attempt and leaves the old attempt
+immutable. At most one deployment per application may be `RUNNING`; archiving an application with an
+active deployment returns `409 INVALID_STATE`.
 
 ## 5. Logs and secrets
 

@@ -1,15 +1,33 @@
 import { z } from 'zod';
+import { parseEncryptionKey } from '@ogulix/shared/server/crypto';
 
 /**
  * Environment schema. Defaults keep the scaffold runnable without a database,
  * but readiness reports 503 until the real services are configured.
  */
+const encryptionKeySchema = z
+  .string()
+  .min(1)
+  .optional()
+  .refine((value) => {
+    if (!value) {
+      return true;
+    }
+    try {
+      parseEncryptionKey(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'ENV_ENCRYPTION_KEY must be base64-encoded 32 bytes');
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     APP_ORIGIN: z.url().default('http://localhost:3000'),
+    RUNTIME_MODE: z.enum(['mock', 'iaas']).default('mock'),
 
     DATABASE_URL: z.string().min(1).optional(),
     REDIS_URL: z.string().min(1).optional(),
@@ -27,7 +45,7 @@ const envSchema = z
     SESSION_IDLE_HOURS: z.coerce.number().int().min(1).max(24).default(24),
     REGISTRATION_MODE: z.enum(['open', 'closed']).default('closed'),
 
-    ENV_ENCRYPTION_KEY: z.string().min(1).optional(),
+    ENV_ENCRYPTION_KEY: encryptionKeySchema,
   })
   .superRefine((env, context) => {
     const origin = new URL(env.APP_ORIGIN);

@@ -2,7 +2,7 @@
 
 ## 1. Scope
 
-This document defines the initial relational model for the academic MVP. It is a logical design to be translated into and reviewed as a Prisma schema. Exact SQL types, indexes and migration details are finalized during initialization.
+This document defines the relational model for the academic MVP. It is translated into and reviewed as the Prisma schema at `backend/prisma/schema.prisma`, with additive migrations in `backend/prisma/migrations/`. The pre-IAAS Sprint A migration adds application deployment configuration and deployment audit metadata.
 
 ## 2. ERD
 
@@ -11,6 +11,7 @@ erDiagram
     USER ||--o{ APPLICATION : owns
     USER ||--o{ SESSION : authenticates
     USER ||--o{ AUDIT_EVENT : performs
+    USER ||--o{ DEPLOYMENT : requests
     APPLICATION ||--o{ DEPLOYMENT : has
     APPLICATION ||--o{ DOMAIN : exposes
     APPLICATION ||--o{ ENVIRONMENT_VARIABLE : configures
@@ -40,6 +41,13 @@ erDiagram
       string name
       string source_repository
       string default_branch
+      string dockerfile_path
+      string build_context
+      int internal_port
+      string health_check_path
+      float cpu_cores
+      int memory_mb
+      int pids_limit
       string status
       datetime created_at
       datetime updated_at
@@ -59,12 +67,17 @@ erDiagram
       string application_id FK
       string runtime_node_id FK
       string status
+      string branch
       string commit_sha
       string image_reference
       string image_digest
       int allocated_port
       string idempotency_key
+      string request_fingerprint
+      string requested_by_user_id FK
       string error_code
+      int log_line_count
+      int log_byte_count
       datetime started_at
       datetime finished_at
       datetime created_at
@@ -117,12 +130,24 @@ camelCase field and map it with `@map`, so there is exactly one translation rule
   the future and `lastSeenAt` is within the idle window.
 - `Application.ownerId` is mandatory. Every application query/mutation must include ownership authorization.
 - `Application.status` is `ARCHIVED` for soft-deleted records; deletion never hard-removes deployment
-  history.
+  history. Archiving is rejected while an active deployment exists.
+- `Application` stores deployment configuration: `dockerfilePath`, `buildContext`, `internalPort`,
+  `healthCheckPath`, `cpuCores`, `memoryMb`, `pidsLimit`. Defaults are documented in
+  `docs/design/decisions.md`; paths must remain inside the repository.
 - `Deployment` belongs to one application and may reference a selected runtime node. A deployment record remains as history after later deployments.
+- `Deployment.branch` records the requested branch (or the application default). `requestedByUserId`
+  references the requesting user and becomes null if that user is deleted.
+- `Deployment.requestFingerprint` is the SHA-256 of the normalized deploy request. It is compared when
+  an idempotency key is reused; a mismatch returns `409 IDEMPOTENCY_CONFLICT`.
+- At most one deployment per application may be `RUNNING`. A restart creates a new deployment attempt;
+  it never mutates the old attempt's terminal status.
+- `Deployment.logLineCount` and `logByteCount` are maintained with log inserts so the cap can be
+  enforced without scanning all log rows.
 - `Deployment.imageDigest` is immutable once set; `imageReference` is the node-local tag used for
   rollback. Neither is exposed through the API in the MVP.
 - `Deployment.idempotencyKey` is supplied by the client. `(applicationId, idempotencyKey)` is unique so
-  a repeated request resolves to the existing deployment instead of creating a second release.
+  a repeated request resolves to the existing deployment instead of creating a second release. The
+  stored fingerprint must match the repeated payload.
 - `Deployment.allocatedPort` is unique per runtime node while the deployment is active, and always
   falls in `30000-32767`.
 - `DeploymentLog` stores redacted text only, capped at 2000 lines or 200 KB per deployment, with a
@@ -147,6 +172,9 @@ camelCase field and map it with `@map`, so there is exactly one translation rule
 - Index: `Application(ownerId, createdAt)`.
 - Index: `Deployment(applicationId, createdAt)`.
 - Index: `Deployment(runtimeNodeId, status)`.
+- Index: `Deployment(status, createdAt)` for recovery/queue scans.
+- Index: `Deployment(requestedByUserId, createdAt)` for requester audit.
+- Index: `RuntimeNode(status, lastHeartbeatAt)` for node-health scans.
 - Index: `Session(userId, expiresAt)`.
 - Index: `AuditEvent(actorUserId, createdAt)`.
 - Foreign keys use restrictive or cascading behavior deliberately; deleting an application should not silently erase deployment audit history. Prefer archive/soft-delete semantics for application records in the MVP.

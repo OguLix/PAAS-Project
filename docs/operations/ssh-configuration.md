@@ -48,7 +48,7 @@ argument-safe process invocation inside the helper and avoid shell
 interpolation entirely. Unknown verbs are rejected before any process is
 spawned.
 
-The protocol types live in `shared/contracts/node-protocol.ts`.
+The protocol types live in `shared/types/node-protocol.ts`.
 
 ## 4. Privilege model
 

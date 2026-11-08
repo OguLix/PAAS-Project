@@ -87,7 +87,7 @@ never open a shell. The helper reads a verb plus a JSON payload on stdin and acc
 `container-remove`, `logs`, `cleanup`.
 
 Everything else is rejected before any process is spawned. The request and response types live in
-`shared/contracts/node-protocol.ts`. Environment values are passed in the payload, never as
+`shared/types/node-protocol.ts`. Environment values are passed in the payload, never as
 interpolated arguments. SSH targets are allowlisted runtime nodes; credentials are dedicated and
 restricted.
 
@@ -100,7 +100,12 @@ before any reload. Route changes are therefore a local file operation, not a rem
 - Retry only transient operations and use bounded attempts/backoff.
 - Do not blindly retry non-idempotent container creation.
 - Use deployment ID as an idempotency/correlation key.
-- Persist each state transition.
+- The BullMQ payload contract is shared and discriminated by `kind` (`deploy`, `stop`, `restart`).
+  It carries identifiers and validated options only, never secrets or arbitrary shell commands.
+- Persist each state transition and reject transitions that the shared state machine forbids.
+- A restart job creates a new deployment attempt; it never reopens a terminal deployment row.
+- At most one deployment per application may be `RUNNING`; replace the current healthy container
+  only after the new attempt passes its health check unless stop-first is explicitly forced.
 - If a job fails, retain a sanitized error code and correlation ID.
 - Ensure temporary workspaces are cleaned after success, failure and timeout.
 - A worker restart must safely resume or mark stale jobs according to a documented recovery policy.

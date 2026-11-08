@@ -31,9 +31,12 @@ export const API_ERROR_CODES = [
   'REGISTRATION_CLOSED',
   'NOT_FOUND',
   'CONFLICT',
+  'INVALID_STATE',
+  'IDEMPOTENCY_CONFLICT',
   'UNPROCESSABLE',
   'RATE_LIMITED',
   'INTERNAL_ERROR',
+  'SERVICE_UNAVAILABLE',
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
@@ -55,10 +58,14 @@ export type ApiErrorResponse = {
 
 export type HealthStatus = 'ok' | 'degraded' | 'unavailable';
 
+/** Whether runtime operations are simulated or target the IAAS nodes. */
+export type RuntimeMode = 'mock' | 'iaas';
+
 export type HealthResponse = {
   status: HealthStatus;
   service: string;
   uptimeSeconds: number;
+  runtimeMode: RuntimeMode;
 };
 
 export type ReadinessCheck = {
@@ -82,7 +89,17 @@ export type AuthUser = {
 
 export type ApplicationStatus = 'ACTIVE' | 'ARCHIVED';
 
-export type ApplicationResponse = {
+export type ApplicationDeploymentConfig = {
+  dockerfilePath: string;
+  buildContext: string;
+  internalPort: number;
+  healthCheckPath: string;
+  cpuCores: number;
+  memoryMb: number;
+  pidsLimit: number;
+};
+
+export type ApplicationResponse = ApplicationDeploymentConfig & {
   id: string;
   name: string;
   sourceRepository: string;

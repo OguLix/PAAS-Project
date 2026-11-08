@@ -12,9 +12,12 @@ const ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   REGISTRATION_CLOSED: 'Registration is closed for this workspace.',
   NOT_FOUND: 'That item no longer exists.',
   CONFLICT: 'That conflicts with an existing item.',
+  INVALID_STATE: 'That action is not allowed while the resource is in its current state.',
+  IDEMPOTENCY_CONFLICT: 'This request key was already used with different input.',
   UNPROCESSABLE: 'The request could not be processed.',
   RATE_LIMITED: 'Too many attempts. Wait a moment and try again.',
   INTERNAL_ERROR: 'The server could not complete the request.',
+  SERVICE_UNAVAILABLE: 'The service is temporarily unavailable. Try again shortly.',
 };
 
 const NETWORK_MESSAGE = 'Cannot reach the API. Check your connection and try again.';

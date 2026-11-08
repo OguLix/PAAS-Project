@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_APPLICATION_CONFIG,
   DEPLOYMENT_STATUSES,
   DEPLOYMENT_STATUS_LABELS,
   DEPLOYMENT_TRANSITIONS,
   NODE_COMMANDS,
   TERMINAL_DEPLOYMENT_STATUSES,
+  applicationDeploymentConfigSchema,
   canTransition,
   createApplicationInputSchema,
   createDomainInputSchema,
+  deployInputSchema,
+  deploymentJobPayloadSchema,
+  environmentVariableKeySchema,
   isDeploymentStatus,
   isNodeCommand,
   loginInputSchema,
@@ -99,6 +104,33 @@ describe('repository URL validation', () => {
       false,
     );
   });
+
+  it('rejects private, loopback and link-local hosts', () => {
+    for (const url of [
+      'https://localhost/repo.git',
+      'https://127.0.0.1/repo.git',
+      'https://10.0.0.5/repo.git',
+      'https://172.16.1.4/repo.git',
+      'https://192.168.174.145/repo.git',
+      'https://169.254.169.254/latest/meta-data',
+      'https://[::1]/repo.git',
+      'https://[fd00::1]/repo.git',
+      'https://metadata.google.internal/repo.git',
+      'https://git.internal/repo.git',
+    ]) {
+      expect(repositoryUrlSchema.safeParse(url).success, url).toBe(false);
+    }
+  });
+
+  it('rejects non-default HTTPS ports and non-qualified hosts', () => {
+    expect(repositoryUrlSchema.safeParse('https://github.com:8443/ogulix/demo.git').success).toBe(
+      false,
+    );
+    expect(repositoryUrlSchema.safeParse('https://intranet/ogulix/demo.git').success).toBe(false);
+    expect(repositoryUrlSchema.safeParse('https://github.com:443/ogulix/demo.git').success).toBe(
+      true,
+    );
+  });
 });
 
 describe('application input contract', () => {
@@ -120,6 +152,58 @@ describe('application input contract', () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it('accepts optional deployment configuration and validates resource limits', () => {
+    const parsed = createApplicationInputSchema.safeParse({
+      name: 'demo',
+      sourceRepository: 'https://github.com/ogulix/demo.git',
+      defaultBranch: 'main',
+      dockerfilePath: 'docker/Dockerfile',
+      buildContext: 'apps/web',
+      internalPort: 8080,
+      healthCheckPath: '/health',
+      cpuCores: 0.75,
+      memoryMb: 768,
+      pidsLimit: 128,
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(applicationDeploymentConfigSchema.parse(DEFAULT_APPLICATION_CONFIG)).toEqual(
+      DEFAULT_APPLICATION_CONFIG,
+    );
+  });
+
+  it('rejects path traversal and unsafe deployment configuration', () => {
+    const base = {
+      name: 'demo',
+      sourceRepository: 'https://github.com/ogulix/demo.git',
+      defaultBranch: 'main',
+    };
+
+    expect(
+      createApplicationInputSchema.safeParse({ ...base, dockerfilePath: '../Dockerfile' }).success,
+    ).toBe(false);
+    expect(createApplicationInputSchema.safeParse({ ...base, buildContext: '/etc' }).success).toBe(
+      false,
+    );
+    expect(
+      createApplicationInputSchema.safeParse({ ...base, healthCheckPath: 'health' }).success,
+    ).toBe(false);
+    expect(createApplicationInputSchema.safeParse({ ...base, memoryMb: 32 }).success).toBe(false);
+  });
+
+  it('rejects unknown fields and unsafe branch names', () => {
+    expect(
+      createApplicationInputSchema.safeParse({
+        name: 'demo',
+        sourceRepository: 'https://github.com/ogulix/demo.git',
+        defaultBranch: 'main',
+        unexpected: true,
+      }).success,
+    ).toBe(false);
+    expect(deployInputSchema.safeParse({ branch: 'feature/../main' }).success).toBe(false);
+    expect(deployInputSchema.safeParse({ branch: 'feature/new-ui' }).success).toBe(true);
   });
 });
 
@@ -165,5 +249,28 @@ describe('runtime node protocol contract', () => {
   it('has no shell or exec verb', () => {
     expect(isNodeCommand('shell')).toBe(false);
     expect(isNodeCommand('exec')).toBe(false);
+  });
+});
+
+describe('environment and queue contracts', () => {
+  it('reserves platform-managed environment variable names', () => {
+    for (const key of ['PATH', 'PORT', 'NODE_OPTIONS', 'OGULIX_SECRET']) {
+      expect(environmentVariableKeySchema.safeParse(key).success, key).toBe(false);
+    }
+    expect(environmentVariableKeySchema.safeParse('DATABASE_PASSWORD').success).toBe(true);
+  });
+
+  it('requires a discriminated deployment job kind', () => {
+    const base = {
+      deploymentId: 'dep_1',
+      applicationId: 'app_1',
+      requestedByUserId: 'user_1',
+      kind: 'deploy',
+    };
+    expect(deploymentJobPayloadSchema.safeParse(base).success).toBe(true);
+    expect(deploymentJobPayloadSchema.safeParse({ ...base, kind: undefined }).success).toBe(false);
+    expect(
+      deploymentJobPayloadSchema.safeParse({ ...base, kind: 'shell', command: 'rm -rf /' }).success,
+    ).toBe(false);
   });
 });

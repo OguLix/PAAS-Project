@@ -9,9 +9,6 @@
 -   Network access: local/private only; never public
 
 Use a MariaDB version supported by the selected Prisma version and pin
-the chosen server image/package version during implementation.
-
-Use a MariaDB version supported by the selected Prisma version and pin
 the chosen server image/package version during implementation. Local
 development uses the MariaDB 11.4 container from the local compose file;
 the Server 1 package version is pinned to the same major version so
@@ -32,19 +29,30 @@ migrations are validated against the engine that will run them.
 
   Application             Deployable application  id, ownerId, name,
                                                   sourceRepository,
-                                                  defaultBranch, status
+                                                  defaultBranch,
+                                                  dockerfilePath,
+                                                  buildContext,
+                                                  internalPort,
+                                                  healthCheckPath,
+                                                  cpuCores, memoryMb,
+                                                  pidsLimit, status
 
   RuntimeNode             Registered VM           id, name, host,
                                                   sshPort, status,
-                                                  capacity metadata
+                                                  capacity metadata,
+                                                  lastHeartbeatAt
 
   Deployment              One build/release       id, applicationId,
-                          attempt                 runtimeNodeId,
+                          attempt                 runtimeNodeId, branch,
                                                   commitSha,
                                                   imageReference,
                                                   imageDigest,
                                                   allocatedPort,
                                                   idempotencyKey,
+                                                  requestFingerprint,
+                                                  requestedByUserId,
+                                                  logLineCount,
+                                                  logByteCount,
                                                   status, timestamps
 
   DeploymentLog           Bounded build output    id, deploymentId,
@@ -77,6 +85,10 @@ history and node scheduling queries. The full index list is in
     ownership/role checks.
 -   Deployment records are append-oriented history; do not overwrite
     historical source revisions or image digests.
+-   A restart creates a new deployment attempt. At most one deployment
+    per application may be `RUNNING`.
+-   Archive is rejected with `409 INVALID_STATE` while an active
+    deployment exists.
 -   Store immutable image digests in deployment records.
 -   Store secrets encrypted at application level; the encryption key
     must be outside the database and source repository.
@@ -89,8 +101,9 @@ history and node scheduling queries. The full index list is in
 
 -   The schema lives at `backend/prisma/schema.prisma` with its migrations in
     `backend/prisma/migrations/`. Prisma requires schema and migrations to stay together, so the root
-    `database/` directory holds only pointers, seeds and backup notes. This was approved in
-    `docs/design/decisions.md`.
+    `database/` directory holds only pointers and backup notes. The local seed lives at
+    `backend/src/scripts/seed.ts` and reads admin credentials from environment variables. This was
+    approved in `docs/design/decisions.md`.
 -   Prisma model fields are `camelCase` and map to `snake_case` columns with `@map`/`@@map`. Do not
     add ad-hoc case translation anywhere else.
 -   Use Prisma enums for `UserRole`, `ApplicationStatus`, `NodeStatus`, `DeploymentStatus` and

@@ -60,10 +60,11 @@ wins.
 | GET | `/applications/:applicationId/deployments` | Deployment history. |
 | POST | `/applications/:applicationId/deployments` | `202 Accepted`. |
 | GET | `/deployments/:deploymentId` | Deployment status. |
+| GET | `/deployments/:deploymentId/logs` | Deployment-scoped build logs, paginated. |
 | POST | `/deployments/:deploymentId/cancel` | Only `QUEUED`. |
 | POST | `/deployments/:deploymentId/stop` | Running deployment only. |
-| POST | `/deployments/:deploymentId/restart` | `RUNNING` or `STOPPED`; means "ensure this deployment's container is running". |
-| GET | `/applications/:applicationId/logs` | Bounded, redacted build logs. |
+| POST | `/deployments/:deploymentId/restart` | Creates a new deployment attempt; never rewrites the old attempt. |
+| GET | `/applications/:applicationId/logs` | Application-scoped bounded, redacted logs. |
 | GET | `/nodes` | Runtime node inventory and last-known capacity. |
 | GET | `/applications/:applicationId/domains` | List domains. |
 | POST | `/applications/:applicationId/domains` | Associate hostname. |
@@ -95,6 +96,17 @@ The earlier sequence `QUEUED -> BUILDING -> DEPLOYING -> HEALTH_CHECKING -> SUCC
 The enum is defined once in `shared/types/` and imported by backend, worker and frontend. No module
 may redeclare it.
 
+### 3.4 Deployment lifecycle and request semantics
+
+| ID | Decision | Reason |
+|---|---|---|
+| B7a | Deployment creation requires `Idempotency-Key` plus a SHA-256 fingerprint of the normalized request body. The same key with the same fingerprint returns the existing deployment; the same key with a different fingerprint returns `409 IDEMPOTENCY_CONFLICT`. | A retry must be safe without silently accepting a changed payload. |
+| B7b | At most one deployment may be `RUNNING` for an application. A new deployment is built and health-checked alongside the current one where resources allow, then replaces it. If stop-first is unavoidable, the API response and logs must state the expected downtime. | Prevent two live containers claiming the same route. |
+| B7c | `POST /deployments/:deploymentId/restart` creates a new deployment attempt and leaves the old attempt immutable. | History must remain auditable; restart is not an in-place mutation. |
+| B7d | Archiving an application with an active (`QUEUED` through `HEALTH_CHECKING`, or `RUNNING`) deployment returns `409 INVALID_STATE`. The deployment must be stopped or cancelled first. | Avoid orphaned containers and an unreachable-but-running application. |
+| B7e | Deployment list and log endpoints are paginated with a maximum page size of 100. | Bounded responses and predictable UI behaviour. |
+| B7f | Environment variable keys that are platform-managed (`PATH`, `PORT`, `NODE_ENV`, `OGULIX_*`, and similar) are rejected at the contract boundary. | The platform, not a user, owns runtime wiring. |
+
 ## 4. Data model
 
 | ID | Decision | Reason |
@@ -107,6 +119,10 @@ may redeclare it.
 | B5 | Add `Session` and `DeploymentLog` tables. `AuditEvent.actorUserId` is nullable. | Sessions must be revocable; logs need a bounded home; failed logins have no actor. |
 | B6 | `Deployment.allocatedPort` is unique per `(runtimeNodeId, allocatedPort)` while active. Allocation range per node is `30000-32767`. | Prevents two containers claiming the same host port. |
 | B7 | `Deployment.idempotencyKey` with a unique `(applicationId, idempotencyKey)` constraint. Repeating a request returns the existing deployment. | A double-click must not create two releases. |
+| B8 | `Application` stores deployment configuration: `dockerfilePath`, `buildContext`, `internalPort`, `healthCheckPath`, `cpuCores`, `memoryMb` and `pidsLimit`. Defaults are `Dockerfile`, `.`, `3000`, `/`, `0.5`, `512` and `100`. | Deployment behaviour must be auditable configuration, not hard-coded worker constants. |
+| B9 | `Deployment` stores `branch`, `requestFingerprint`, `requestedByUserId`, `logLineCount` and `logByteCount`. The requester reference is nullable and uses `ON DELETE SET NULL`. | Preserve who requested an attempt and enforce log caps without scanning every row. |
+| B10 | Recovery indexes cover `(status, createdAt)`, `(requestedByUserId, createdAt)` and `(status, lastHeartbeatAt)`. | Bounded queue, audit and node-health queries. |
+| B11 | Local seed creates one admin and two explicitly mocked runtime nodes from environment variables. Admin credentials are never hardcoded. Production seeding requires `SEED_ALLOW_PRODUCTION=true`. | `REGISTRATION_MODE=closed` otherwise leaves no way to sign in locally. |
 
 `Session` stores only a hash of the token. `DeploymentLog` stores redacted text only.
 
@@ -119,17 +135,21 @@ client:
 - The connection URL lives in `backend/prisma.config.ts`, read from `DATABASE_URL`. The datasource is
   optional there so `prisma validate` works without a database, but migration and introspection
   commands require it.
-- Instantiating `PrismaClient` requires a driver adapter. Backend 1 uses
-  `@prisma/adapter-mariadb` with the `mariadb` driver; it parses the configured `DATABASE_URL` into
-  adapter options rather than relying on a URL-only constructor.
+- Instantiating `PrismaClient` requires a driver adapter. The shared server-only factory in
+  `shared/server/prisma.ts` uses `@prisma/adapter-mariadb` with the `mariadb` driver; it parses the
+  configured `DATABASE_URL` into adapter options rather than relying on a URL-only constructor.
+  Backend and worker import it through `@ogulix/shared/server/prisma`.
 
 ## 5. Logging
 
 | Kind | Storage | Limit |
 |---|---|---|
-| Build log | `DeploymentLog` in MariaDB, redacted before insert | 2000 lines or 200 KB per deployment, paginated by the API |
+| Build log | `DeploymentLog` in MariaDB, redacted before insert | 2000 lines or 200 KB per deployment, paginated by the API; `Deployment.logLineCount` and `logByteCount` are maintained transactionally |
 | Runtime container log | Not persisted. Fetched on demand over SSH with `--tail` and `--since` bounds. | Hard cap per request, no full-history dump |
 | Application audit | `AuditEvent` | 180 days |
+
+Log messages are passed through `shared/server/redaction.ts` before persistence and before any
+API response. Redaction is defence in depth; producers must still never log secret values.
 
 Rationale: build output is produced on Server 2/3 but must be readable through the Server 1 API, so
 it has to be shipped and bounded. Container logs are high-volume and would exhaust a 15 GB disk.
@@ -143,11 +163,12 @@ it has to be shipped and bounded. Container logs are high-volume and would exhau
 | D3 | Registration controlled by `REGISTRATION_MODE` (`open` or `closed`), default `closed`. The endpoint exists in both modes and returns `403` when closed. |
 | D4 | Session lifetime: 7 days absolute, 24 hours idle timeout. |
 | D5 | CSRF defense: `SameSite=Lax` plus an `Origin`/`Sec-Fetch-Site` check on every state-changing request. |
-| D6 | Secrets for environment variables are encrypted with AES-256-GCM. The key comes from `ENV_ENCRYPTION_KEY` (base64, 32 bytes) and never enters the database or repository. Ciphertext is stored as `v1:<iv>:<tag>:<ciphertext>` so a key version can be rotated later. |
+| D6 | Secrets for environment variables are encrypted with AES-256-GCM. The key comes from `ENV_ENCRYPTION_KEY` (base64, 32 bytes) and never enters the database or repository. Ciphertext is stored as `v1:<iv>:<tag>:<ciphertext>` so a key version can be rotated later. Encryption, decryption, redaction and Prisma factories are server-only exports under `@ogulix/shared/server/*`; the frontend must never import them. |
 
 Public repositories only in the MVP. No Git credentials are stored: only `https://` URLs without
-embedded user info are accepted, and `ssh://`, `git://`, `file://` and credentialed URLs are
-rejected at validation.
+embedded user info, non-default ports, or private/loopback/link-local hosts are accepted. `ssh://`,
+`git://`, `file://`, credentialed URLs and metadata-service hostnames are rejected at validation,
+and the worker repeats the check before a build.
 
 ## 7. Runtime nodes and routing
 
@@ -156,7 +177,7 @@ rejected at validation.
 | E1 | Traefik splits traffic on one origin: `/api/*` to the Express API (`:3001`), everything else to Next.js (`:3000`). Both are internal listeners; Traefik is the only exposed entry point. |
 | E2 | Node control uses an SSH forced command. Each runtime node's `authorized_keys` entry pins `command="/usr/local/bin/ogulix-node"`, so the key can never open a shell. The helper accepts a verb plus JSON on stdin. |
 | E2a | Allowed verbs: `node-info`, `build`, `container-upsert`, `container-start`, `container-stop`, `container-inspect`, `container-remove`, `logs`, `cleanup`. Nothing else is executable. |
-| E2b | The request/response shape lives in `shared/contracts/node-protocol.ts`. Authentication of the caller is the SSH key; authorization is the verb allowlist plus validated arguments. |
+| E2b | The request/response shape lives in `shared/types/node-protocol.ts`. Authentication of the caller is the SSH key; authorization is the verb allowlist plus validated arguments. |
 | E3 | Traefik listener port and origin reachability from the Windows tunnel host remain unverified. The `8080` example is a placeholder only, and no Cloudflare change happens before IAAS confirms the origin. |
 
 Traefik runs on Server 1, which is also where the worker runs, so route files are written locally and
@@ -169,15 +190,28 @@ by the API.
 - Runtime: Node.js 22 LTS, pinned in `engines` and `.nvmrc`.
 - Language: TypeScript with `strict: true` everywhere.
 - Validation: Zod, shared by the API boundary and client-side forms, so one schema serves both.
-- Styling: Tailwind CSS only. No component library in the scaffold.
+- Styling: Tailwind CSS only, with shadcn/ui-style local primitives in `frontend/src/components/ui`.
 - Tests: Vitest.
 - Lint and format: ESLint plus Prettier.
 - Shared code: `shared/` is a workspace package consumed by backend, worker and frontend.
+
+### 8.1 Shared package boundary
+
+The root `@ogulix/shared` export is browser-safe: contracts, DTOs and pure state helpers only. Code
+that needs Node built-ins, `@prisma/client`, encryption, SSH or other control-plane capabilities
+lives under `@ogulix/shared/server/*` and is imported only by the API, worker and seeds. ESLint
+blocks frontend imports of the server subpath, Prisma, Argon2, BullMQ, ioredis, MariaDB and sensitive
+Node built-ins. The worker and API consume the same Prisma factory and redaction functions to avoid
+drift.
 
 ## 9. Runtime defaults
 
 | Setting | Value |
 |---|---|
+| Dockerfile path | `Dockerfile` relative to repository root |
+| Build context | `.` relative to repository root |
+| Internal application port | `3000` |
+| Health check path | `/` |
 | Container CPU | 0.5 core |
 | Container memory | 512 MiB |
 | Container PID limit | 100 |
@@ -197,7 +231,6 @@ filesystem, because both can break ordinary application images.
 
 | Item | Owner | Blocking |
 |---|---|---|
-| UI component library and design system | Frontend 1 | Feature UI work, not the scaffold |
 | Traefik listener address and port; origin reachability from the Windows tunnel host | IAAS with Cloudflare owner | Any Cloudflare change |
 | Measured Server 1 memory budget per service | IAAS | Enabling control-plane services on Server 1 |
 | Whether deployed application hostnames need Cloudflare Access | Cloudflare owner with project owner | Public app routing |
@@ -207,3 +240,4 @@ filesystem, because both can break ordinary application images.
 | Date | Change | Approved by |
 |---|---|---|
 | 2026-11-01 | Initial decision record created; Server 1 memory raised to 4 GiB; API, data model, logging, auth, routing and tooling decisions locked | Project owner |
+| 2026-11-08 | Pre-IAAS Sprint A: deployment config columns, restart/new-attempt semantics, one-running rule, archive `409`, idempotency fingerprint, log counters, server-only shared boundary, seed policy, SSRF guard and deployment log endpoint frozen | Project owner |

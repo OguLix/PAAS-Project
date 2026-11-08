@@ -81,6 +81,24 @@ service.
 
 The project is handled by five people: one IAAS/infrastructure member, two frontend members, and two backend members. One of the frontend members also owns Cloudflare edge configuration and coordinates it with the IAAS member. This is a cross-cutting responsibility, not a replacement for the IAAS role. See [team responsibilities](docs/operations/team-responsibilities.md).
 
+## Local development
+
+```sh
+docker compose -f infrastructure/docker/compose.dev.yml up -d
+npm install
+npm run db:migrate:dev
+npm run db:seed
+npm run dev:backend
+```
+
+Copy `.env.example` to `.env` first and fill the placeholders. `db:seed` creates one admin and two
+explicitly mocked runtime nodes; it refuses to run in production unless
+`SEED_ALLOW_PRODUCTION=true` and never contains a hardcoded admin password. Keep
+`RUNTIME_MODE=mock` until an IAAS deployment is explicitly approved.
+
+Unit and contract tests do not need Docker. Integration tests that use MariaDB/Redis require the local
+compose services. The compose file targets localhost only and must never be pointed at the IAAS VMs.
+
 ## Documentation
 
 ### Architecture and implementation design
@@ -96,6 +114,7 @@ The project is handled by five people: one IAAS/infrastructure member, two front
 - `docs/testing/testing-architecture.md`
 - `docs/implementation/initialization-blueprint.md`
 - `docs/implementation/scaffold-report.md`
+- `docs/implementation/pre-iaas-sprint-a.md`
 
 - `docs/architecture/system-overview.md`
 - `docs/architecture/infrastructure-topology.md`
@@ -116,6 +135,8 @@ The project is handled by five people: one IAAS/infrastructure member, two front
 - [x] Design decisions locked and contradictions reconciled in `docs/design/decisions.md`
 - [x] Repository scaffold initialized from `docs/implementation/initialization-blueprint.md` (see `docs/implementation/scaffold-report.md`)
 - [x] Backend 1 initial auth/session, application and domain API with Prisma/MariaDB repositories and generated initial migration
+- [x] Pre-IAAS Sprint A contract freeze, shared DTOs, server-only boundary, schema/migration, seed foundation and tests (see `docs/implementation/pre-iaas-sprint-a.md`)
+- [ ] Execute the migrations against a disposable MariaDB 11.4 instance; `prisma migrate diff` reports schema/migration parity, but Docker was unavailable in the agent environment
 - [ ] Validate the initial Prisma migration and native enums against a disposable MariaDB 11.4 instance
 - [ ] Server capacity and port preflight (Server 1 memory measured against the 4 GiB budget)
 - [ ] Docker installed on runtime nodes

@@ -15,7 +15,7 @@ Use the Next.js App Router. Prefer server components for static/data-display com
 | Direction source | `DESIGN.md` at the repository root | Owner-authored palette, typography and dials |
 | Theme | Light only | `DESIGN.md` excludes dark backgrounds, and an unverified second theme is worse than one verified theme |
 | Icons | `lucide-react`, only for functional controls (chevron, sign out) | A decorative icon per feature would be the generic default this project rejects |
-| Navigation placement | Top bar, not a sidebar | The shell has one destination today; a sidebar with one entry reads as empty. Moving `navItems` into a sidebar later is a `topbar.tsx` change |
+| Navigation placement | Sidebar, with the existing top bar retained for account controls | The sidebar is the primary dashboard navigation and scales to applications, deployments, nodes and settings. The top bar is not the navigation source |
 
 Form validation and API validation must converge on the same Zod schemas in `shared/` as soon as that
 package carries the corresponding contract. Until then the authentication form schemas live in
@@ -88,7 +88,7 @@ The tree in section 2 is the target. Current implementation status:
 | `app/(auth)/layout.tsx`, `(auth)/login`, `(auth)/register` | Implemented |
 | `app/(dashboard)/layout.tsx`, `(dashboard)/dashboard` | Implemented |
 | `components/ui/` | button, input, label, field, alert, card, skeleton |
-| `components/layout/` | topbar, user-menu, nav-items, dashboard-shell, mock-notice |
+| `components/layout/` | topbar, user-menu, nav-items, dashboard-shell, mock-notice (sidebar is the agreed target, not yet implemented) |
 | `components/feedback/` | loading-state, empty-state, error-state |
 | `features/auth/` | schema, login-form, register-form, session-store, session-guard |
 | `services/` | `auth.api.ts`, `auth.types.ts`, `mock/auth.mock.ts` |
@@ -114,7 +114,9 @@ the end-to-end lifecycle can work.
 - `features/*/types.ts`: feature-specific view and form types.
 - `hooks/`: reusable client-side behavior, not business rules that belong to the backend.
 
-Do not create a second independent copy of backend DTO definitions manually if a shared package or generated OpenAPI types are later adopted. Until then, mirror the documented API contract and test compatibility.
+Do not create a second independent copy of backend DTO definitions. `@ogulix/shared` is now the
+source of truth for API DTOs and pure state helpers; feature-specific types re-export or extend it.
+The frontend must import only the browser-safe root export, never `@ogulix/shared/server/*`.
 
 ## 5. Authentication and authorization
 
