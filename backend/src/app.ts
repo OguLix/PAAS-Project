@@ -123,6 +123,7 @@ export function createApp(env: AppEnv, dependencies: AppDependencies): express.E
       status: 'ok',
       service: 'ogulix-api',
       uptimeSeconds: Math.round(process.uptime()),
+      runtimeMode: env.RUNTIME_MODE,
     };
 
     response.status(200).json(successResponse(body, response.locals.requestId as string));

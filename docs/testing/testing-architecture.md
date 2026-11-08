@@ -54,6 +54,15 @@
 
 Use local development services or isolated test instances. Never run destructive tests against the existing IAAS environment or live Cloudflare routes without explicit approval. Secrets for tests must be synthetic.
 
+The split is deliberate:
+
+- Unit and contract tests run without Docker and use synthetic values.
+- Integration tests use the local MariaDB 11.4 and Redis services from
+  `infrastructure/docker/compose.dev.yml`; they must never target IAAS hosts.
+- Local end-to-end tests use mock runtime adapters and `RUNTIME_MODE=mock`, so they exercise the
+  control-plane state machine without SSH, Docker or Cloudflare. Mock mode must be visible in health
+  responses and UI notices.
+
 ## 4. Quality gates
 
 Before a feature is considered complete:

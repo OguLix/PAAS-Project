@@ -2,16 +2,19 @@
 
 ## 1. Unit tests
 
+These run without Docker and use synthetic values.
+
 -   API request validation
 -   Authentication and authorization
 -   Session issuance, expiry, idle timeout and revocation
 -   Application ownership enforcement
 -   Deployment state transitions
 -   Cancellation accepted only for `QUEUED` deployments
--   Idempotency of deployment requests
+-   Idempotency key plus request-fingerprint conflict handling
+-   AES-256-GCM encryption/decryption and key validation
 -   Log redaction and size capping
 -   Scheduler decisions with mocked node metrics
--   Resource-limit validation
+-   Resource-limit validation and application path traversal rejection
 -   Traefik configuration generation and validation
 -   Secret redaction
 -   Prisma repository/data-access behavior
@@ -30,19 +33,25 @@
 
 ## 3. End-to-end tests
 
+Local end-to-end tests use mock runtime adapters (`RUNTIME_MODE=mock`) and never contact the IAAS
+VMs. A real IAAS lifecycle test requires separate human approval.
+
 1.  Authenticate as a user.
 2.  Create an application.
 3.  Configure a sample Git repository.
 4.  Request deployment.
-5.  Observe queued/building/deploying states.
+5.  Observe queued/building/starting/health-checking states.
 6.  Confirm a runtime node was selected.
 7.  Confirm container health.
 8.  Open the assigned `*.apps.ogulix.tech` hostname through Cloudflare
     Tunnel.
 9.  View deployment history and logs.
-10. Stop, restart and redeploy the application.
+10. Stop and restart the application; verify restart creates a new
+    deployment attempt and preserves the old one.
 11. Test a failed build and verify the previous healthy release remains
     available where possible.
+12. Try archiving while the application has an active deployment and
+    verify `409 INVALID_STATE`.
 
 ## 4. Infrastructure regression tests
 
@@ -60,8 +69,11 @@
 -   Requirements: the session cookie is `HttpOnly` and the browser cannot read it; a revoked or
     expired session is rejected.
 -   Invalid deployment configuration is rejected.
--   Repository URLs with embedded credentials or non-`https` schemes are rejected.
--   A duplicate deploy request with the same idempotency key does not create a second deployment.
+-   Repository URLs with embedded credentials, non-`https` schemes, non-default ports, or
+    private/loopback/link-local/metadata hostnames are rejected.
+-   Platform-reserved environment-variable keys are rejected.
+-   A duplicate deploy request with the same idempotency key and payload does not create a second
+    deployment; a different payload returns `409 IDEMPOTENCY_CONFLICT`.
 -   Shell metacharacters in user input cannot execute commands.
 -   The node helper rejects an unknown verb without spawning a process.
 -   Secret values do not appear in logs or API responses.

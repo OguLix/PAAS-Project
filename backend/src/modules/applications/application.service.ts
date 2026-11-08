@@ -1,7 +1,8 @@
-import type {
-  ApplicationResponse,
-  CreateApplicationInput,
-  UpdateApplicationInput,
+import {
+  DEFAULT_APPLICATION_CONFIG,
+  type ApplicationResponse,
+  type CreateApplicationInput,
+  type UpdateApplicationInput,
 } from '@ogulix/shared';
 import type {
   ApplicationActor,
@@ -37,7 +38,10 @@ export class ApplicationService {
     actor: ApplicationActor,
     input: CreateApplicationInput,
   ): Promise<ApplicationResponse> {
-    const application = await this.repository.create(actor.userId, input);
+    const application = await this.repository.create(actor.userId, {
+      ...DEFAULT_APPLICATION_CONFIG,
+      ...input,
+    });
     return this.toResponse(application);
   }
 

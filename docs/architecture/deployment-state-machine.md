@@ -15,7 +15,7 @@
 | `FAILED` | Operation failed | Yes |
 | `CANCELLED` | Request cancelled before execution | Yes |
 
-`RUNNING`, `STOPPED`, `FAILED` and `CANCELLED` are terminal for an individual deployment attempt. A restart or redeploy should create an auditable operation/deployment according to the agreed product model; do not silently rewrite history.
+`RUNNING`, `STOPPED`, `FAILED` and `CANCELLED` are terminal for an individual deployment attempt. A restart or redeploy creates a new deployment attempt; the old attempt remains auditable and is never silently rewritten. At most one deployment per application may be `RUNNING`.
 
 ## 2. Normal transition
 
@@ -46,6 +46,13 @@ stateDiagram-v2
 - Repeated job delivery must be idempotent.
 - `FAILED` must include a stable error code and sanitized diagnostic; never include secret values.
 - A deployment must not become `RUNNING` until its container is healthy and its route configuration is active.
+- The default update strategy is build-and-health-check the new attempt alongside the current
+  deployment, then replace it. Stop-first is allowed only when resource limits require it; the
+  expected downtime must be recorded in the deployment log and surfaced in the API response.
+- `POST /deployments/:id/restart` creates a new attempt; it does not reset the old attempt to
+  `QUEUED` or rewrite its timestamps.
+- Archiving an application is blocked while any deployment is active (`QUEUED` through
+  `HEALTH_CHECKING`, or `RUNNING`) and returns `409 INVALID_STATE`.
 
 ## 4. Retry and recovery
 

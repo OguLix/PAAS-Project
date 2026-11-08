@@ -1,31 +1,29 @@
 ﻿import { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
+import { DEPLOYMENT_QUEUE_NAME, type DeploymentJobPayload } from '@ogulix/shared';
 
-export const DEPLOYMENT_QUEUE_NAME = 'deployments';
+export {
+  DEPLOYMENT_QUEUE_NAME,
+  DEPLOY_JOB_NAME,
+  RESTART_JOB_NAME,
+  STOP_JOB_NAME,
+  isDeployJob,
+  isRestartJob,
+  isStopJob,
+} from '@ogulix/shared';
+export type {
+  DeploymentJobName,
+  DeploymentJobPayload,
+  DeployJobPayload,
+  RestartJobPayload,
+  StopJobPayload,
+} from '@ogulix/shared';
 
-export type DeployJobPayload = {
-  deploymentId: string;
-  applicationId: string;
-  requestedByUserId: string;
-  sourceRevision?: string;
-};
-
-export type StopJobPayload = {
-  deploymentId: string;
-  applicationId: string;
-  requestedByUserId: string;
-};
-
-export type RestartJobPayload = {
-  deploymentId: string;
-  applicationId: string;
-  requestedByUserId: string;
-};
-
-export type DeploymentJobPayload = DeployJobPayload | StopJobPayload | RestartJobPayload;
-
-export function createDeploymentQueue(redis: Redis): Queue<DeploymentJobPayload> {
-  return new Queue<DeploymentJobPayload>(DEPLOYMENT_QUEUE_NAME, {
+export function createDeploymentQueue(
+  redis: Redis,
+  queueName: string = DEPLOYMENT_QUEUE_NAME,
+): Queue<DeploymentJobPayload> {
+  return new Queue<DeploymentJobPayload>(queueName, {
     connection: redis,
     defaultJobOptions: {
       attempts: 1,

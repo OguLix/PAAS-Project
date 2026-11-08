@@ -25,7 +25,10 @@
     "dev:worker": "npm run build:shared && npm run dev --workspace @ogulix/worker",
     "dev:frontend": "npm run build:shared && npm run dev --workspace @ogulix/frontend",
     "db:validate": "npm run db:validate --workspace @ogulix/backend",
-    "db:generate": "npm run db:generate --workspace @ogulix/backend"
+    "db:generate": "npm run db:generate --workspace @ogulix/backend",
+    "db:migrate:dev": "npm run db:migrate:dev --workspace @ogulix/backend",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace @ogulix/backend",
+    "db:seed": "npm run db:seed --workspace @ogulix/backend"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

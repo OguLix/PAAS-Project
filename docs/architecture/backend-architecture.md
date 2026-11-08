@@ -101,11 +101,14 @@ Use a consistent error representation from `api-contract.md`. Do not expose stac
 - Authenticate with the opaque `ogulix_session` cookie. Sessions are stored server-side as a hash of
   the token and are revoked by deleting the row. Do not introduce JWT or refresh tokens.
 - Hash passwords with Argon2id; never store plaintext.
-- Accept only public HTTPS Git repositories. Reject URLs with embedded credentials and the
-  `ssh://`, `git://` and `file://` schemes; the MVP stores no source-control credentials.
+- Accept only public HTTPS Git repositories. Reject URLs with embedded credentials, non-default
+  ports, private/loopback/link-local/metadata hosts and the `ssh://`, `git://` and `file://` schemes;
+  the MVP stores no source-control credentials. The worker repeats the check and resolves the host
+  before cloning.
 - Apply ownership checks to every application/deployment lookup and mutation.
 - Encrypt environment-variable values at rest with AES-256-GCM using `ENV_ENCRYPTION_KEY`, which is
-  outside source control and the database.
+  outside source control and the database. Prisma factories, encryption, redaction and other
+  server-only helpers are imported from `@ogulix/shared/server/*`, never from the frontend.
 - Never accept arbitrary shell commands, Docker flags or host paths from users.
 - Apply request size limits, rate limits and safe CORS configuration. State-changing requests must
   pass the `Origin` check described in `docs/design/decisions.md`.
