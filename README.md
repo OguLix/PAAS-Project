@@ -83,6 +83,11 @@ The project is handled by five people: one IAAS/infrastructure member, two front
 
 ## Local development
 
+Copy `.env.example` to `.env` first and fill the placeholders. `ENV_ENCRYPTION_KEY` must be
+base64-encoded 32 random bytes; never reuse a sample value.
+
+### Host-based (fast iteration)
+
 ```sh
 docker compose -f infrastructure/docker/compose.dev.yml up -d
 npm install
@@ -91,13 +96,40 @@ npm run db:seed
 npm run dev:backend
 ```
 
-Copy `.env.example` to `.env` first and fill the placeholders. `db:seed` creates one admin and two
-explicitly mocked runtime nodes; it refuses to run in production unless
-`SEED_ALLOW_PRODUCTION=true` and never contains a hardcoded admin password. Keep
+This compose file starts only MariaDB (`127.0.0.1:3306`) and Redis (`127.0.0.1:6379`); the
+frontend, backend and worker run as host processes.
+
+### Full control plane in Docker
+
+```sh
+docker compose up --build
+docker compose --profile tools run --rm seed
+```
+
+This replaces nothing in the host-based workflow: `docker-compose.yml` at the repository root
+builds and runs the dashboard, API, worker, MariaDB, Redis and a one-shot Prisma migration runner.
+The dashboard is served at `http://localhost:3000` and the API at
+`http://localhost:3001/api/v1/health`. Published ports bind to the loopback interface only, never
+80/443, and MariaDB/Redis are not published at all. See
+`docs/operations/docker-control-plane.md` for the full reference.
+
+Operational notes:
+
+- The backend healthcheck uses `/api/v1/ready`, so it is only healthy once the database answers
+  `SELECT 1`.
+- Redis keeps the BullMQ queue with AOF on the `redis-data` volume; `docker compose down` preserves
+  it, and only `docker compose down -v` deletes the local database and queue data on purpose.
+- The worker reconnects with a bounded backoff and exits non-zero if Redis cannot be recovered, so
+  the restart policy recovers it instead of leaving a worker alive without a queue.
+- `migrate` and `seed` run as the unprivileged `node` user.
+
+`db:seed` creates one admin and two explicitly mocked runtime nodes; it refuses to run in production
+unless `SEED_ALLOW_PRODUCTION=true` and never contains a hardcoded admin password. Keep
 `RUNTIME_MODE=mock` until an IAAS deployment is explicitly approved.
 
-Unit and contract tests do not need Docker. Integration tests that use MariaDB/Redis require the local
-compose services. The compose file targets localhost only and must never be pointed at the IAAS VMs.
+Unit and contract tests do not need Docker. Integration tests that use MariaDB/Redis require either
+local workflow above. Both compose files target localhost only and must never be pointed at the IAAS
+VMs.
 
 ## Documentation
 
@@ -122,6 +154,7 @@ compose services. The compose file targets localhost only and must never be poin
 - `docs/design/database-design.md`
 - `docs/design/api-design.md`
 - `docs/operations/server-preparation.md`
+- `docs/operations/docker-control-plane.md`
 - `docs/operations/ssh-configuration.md`
 - `docs/operations/deployment-guide.md`
 - `docs/operations/cloudflare-operations.md`

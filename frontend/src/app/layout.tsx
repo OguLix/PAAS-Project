@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { Nunito, Outfit } from 'next/font/google';
-import { MockNotice } from '@/components/layout/mock-notice';
 import './globals.css';
 
 const outfit = Outfit({
@@ -24,10 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${outfit.variable} ${nunito.variable}`}>
-      <body className="min-h-screen font-sans antialiased">
-        <MockNotice />
-        {children}
-      </body>
+      <body className="min-h-screen font-sans antialiased">{children}</body>
     </html>
   );
 }

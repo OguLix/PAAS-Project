@@ -1,0 +1,2 @@
+# Next.js serves static assets from `public/`. The folder is committed empty so
+# the Docker build can always copy it, even before the dashboard ships assets.

@@ -1,12 +1,15 @@
 import { apiRequest } from '@/lib/api-client';
 import type { AuthApi, LoginInput, MeResponse, RegisterInput } from './auth.types';
-import { isMockEnabled, mockAuthApi } from './mock/auth.mock';
 
 /**
- * The only place a screen may call authentication. Swapping the mock for the
- * real API happens here and nowhere else.
+ * The only place a screen may call authentication.
+ *
+ * The real API is always used. There is no mock fallback: when the backend is
+ * unreachable the call fails and the UI reports a connection error instead of
+ * silently serving simulated data. `services/mock/auth.mock.ts` still exists as
+ * an explicit fixture for tests, and it is never imported from production code.
  */
-const realAuthApi: AuthApi = {
+export const authApi: AuthApi = {
   async me(): Promise<MeResponse> {
     const response = await apiRequest<MeResponse>('/auth/me');
     return response.data;
@@ -34,5 +37,3 @@ const realAuthApi: AuthApi = {
     await apiRequest<Record<string, never>>('/auth/logout', { method: 'POST' });
   },
 };
-
-export const authApi: AuthApi = isMockEnabled() ? mockAuthApi : realAuthApi;

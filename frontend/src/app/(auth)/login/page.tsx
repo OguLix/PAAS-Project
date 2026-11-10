@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { Alert } from '@/components/ui/alert';
 import { LoginForm } from '@/features/auth/login-form';
 import { safeNextPath } from '@/lib/errors';
-import { isMockEnabled } from '@/services/mock/auth.mock';
 
 type LoginPageProps = {
   searchParams: Promise<{ next?: string; registered?: string }>;
@@ -24,12 +23,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       ) : null}
 
       <LoginForm nextPath={nextPath} />
-
-      {isMockEnabled() ? (
-        <Alert tone="info" title="Mock sign in">
-          demo@ogulix.test with password ogulix-demo-1
-        </Alert>
-      ) : null}
 
       <p className="text-sm text-muted">
         Need an account?{' '}
