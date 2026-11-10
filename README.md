@@ -113,6 +113,16 @@ The dashboard is served at `http://localhost:3000` and the API at
 80/443, and MariaDB/Redis are not published at all. See
 `docs/operations/docker-control-plane.md` for the full reference.
 
+Operational notes:
+
+- The backend healthcheck uses `/api/v1/ready`, so it is only healthy once the database answers
+  `SELECT 1`.
+- Redis keeps the BullMQ queue with AOF on the `redis-data` volume; `docker compose down` preserves
+  it, and only `docker compose down -v` deletes the local database and queue data on purpose.
+- The worker reconnects with a bounded backoff and exits non-zero if Redis cannot be recovered, so
+  the restart policy recovers it instead of leaving a worker alive without a queue.
+- `migrate` and `seed` run as the unprivileged `node` user.
+
 `db:seed` creates one admin and two explicitly mocked runtime nodes; it refuses to run in production
 unless `SEED_ALLOW_PRODUCTION=true` and never contains a hardcoded admin password. Keep
 `RUNTIME_MODE=mock` until an IAAS deployment is explicitly approved.

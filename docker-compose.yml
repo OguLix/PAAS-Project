@@ -62,10 +62,23 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    # BullMQ requires an eviction policy of `noeviction`. Local data is not
-    # persisted, which is intentional for the MVP queue.
+    # BullMQ needs `noeviction`. AOF (`appendonly yes`, `appendfsync everysec`)
+    # keeps queued jobs across container recreation; RDB snapshots are disabled
+    # so there is a single persistence format to reason about.
     command:
-      ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory-policy', 'noeviction']
+      [
+        'redis-server',
+        '--save',
+        '',
+        '--appendonly',
+        'yes',
+        '--appendfsync',
+        'everysec',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -111,15 +124,18 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
+      # Readiness, not liveness: `/ready` returns 503 until `SELECT 1` succeeds
+      # and REDIS_URL is configured, so the API is only healthy once it can
+      # actually serve requests. The endpoint contract is unchanged.
       test:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3001/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        - "fetch('http://127.0.0.1:3001/api/v1/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     networks:
       - control-plane
 
@@ -141,9 +157,15 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      # The worker exposes no HTTP port, so readiness is the Redis connection and
-      # liveness is the node process (PID 1) itself.
-      test: ['CMD', 'node', '-e', 'process.kill(1, 0)']
+      # The worker serves no HTTP. It reports healthy only when Redis is
+      # reachable from inside this container, so a lost queue connection shows
+      # up as `unhealthy` (and the worker process itself exits non-zero, letting
+      # the restart policy recover it). The URL is never printed.
+      test:
+        - CMD
+        - node
+        - -e
+        - "const Redis=require('ioredis');const url=process.env.REDIS_URL;if(!url){process.exit(1);}const c=new Redis(url,{lazyConnect:true,retryStrategy:()=>null,maxRetriesPerRequest:1,connectTimeout:3000});c.on('error',()=>{});c.connect().then(()=>c.ping()).then(()=>c.quit()).then(()=>process.exit(0)).catch(()=>{try{c.disconnect();}catch{}process.exit(1);});"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -204,6 +226,7 @@ services:
 
 volumes:
   mariadb-data:
+  redis-data:
 
 networks:
   control-plane:

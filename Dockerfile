@@ -52,14 +52,22 @@ COPY worker ./worker
 COPY frontend ./frontend
 
 RUN npm run db:generate
+# Fail fast if `prisma generate` did not produce a loadable client. Prisma 7 no
+# longer ships a postinstall hook, so this generated folder is the only source
+# of the client for every runtime target.
+RUN test -f node_modules/.prisma/client/index.js
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Production dependencies only. The Prisma client is generated in `build` and
-# copied separately, so the postinstall generate step is skipped here.
+# Production dependencies only.
+#
+# Prisma 7.10.1 has no postinstall lifecycle script (verified from the installed
+# package manifests), so `npm ci --omit=dev` never generates or overwrites a
+# Prisma Client. The generated client from `build` is copied into the runtime
+# targets explicitly, and `prisma` (a dev dependency) is not installed here, so
+# the API image carries no CLI.
 # ---------------------------------------------------------------------------
 FROM base AS prod-deps
-ENV PRISMA_SKIP_POSTINSTALL_GENERATE=1
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/package.json
 COPY backend/package.json ./backend/package.json
@@ -70,14 +78,18 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # ---------------------------------------------------------------------------
 # One-shot migration runner. Needs the Prisma CLI, the schema and the
 # migrations folder, so it is built from the full `build` stage.
+# Runs as the unprivileged `node` user: migrations only read the schema and
+# migrations folder and write to the database over the network.
 # ---------------------------------------------------------------------------
 FROM build AS migrate
+USER node
 CMD ["npm", "run", "db:migrate:deploy", "--workspace", "@ogulix/backend"]
 
 # ---------------------------------------------------------------------------
 # One-shot seed runner. Only used with the optional `tools` compose profile.
 # ---------------------------------------------------------------------------
 FROM build AS seed
+USER node
 CMD ["npm", "run", "db:seed", "--workspace", "@ogulix/backend"]
 
 # ---------------------------------------------------------------------------
@@ -92,6 +104,10 @@ COPY --chown=node:node shared/package.json ./shared/package.json
 COPY --from=build --chown=node:node /app/shared/dist ./shared/dist
 COPY --chown=node:node backend/package.json ./backend/package.json
 COPY --from=build --chown=node:node /app/backend/dist ./backend/dist
+# Prove the generated Prisma Client and the shared Prisma factory load with the
+# production dependency set, so a broken copy fails the build instead of the
+# first request. No database connection is opened here.
+RUN node -e "require('@prisma/client'); require('/app/shared/dist/server/prisma.js'); console.log('prisma client and factory loadable');"
 USER node
 WORKDIR /app/backend
 EXPOSE 3001
