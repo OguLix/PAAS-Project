@@ -44,16 +44,8 @@ function seedDemoUser(): void {
   });
 }
 
-export function isMockEnabled(): boolean {
-  const flag = process.env.NEXT_PUBLIC_USE_MOCKS;
-
-  if (flag === 'true') {
-    return true;
-  }
-
-  if (flag === 'false') {
+export function isMockEnabled(): boolean {  
     return false;
-  }
 
   // Unset: on for local development, always off for a production build.
   return process.env.NODE_ENV !== 'production';

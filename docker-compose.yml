@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    container_name: react_app
+    restart: always
+    ports:
+      - "80:80"
