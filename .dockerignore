@@ -1,0 +1,53 @@
+# Keep the build context small and free of secrets.
+# The control-plane image must never receive a real .env, a private key or a
+# local database. Only .env.example is allowed through the exclusion below.
+
+# Version control and CI
+.git
+.gitignore
+.gitattributes
+.github
+
+# Dependencies and build output (reinstalled and rebuilt inside the image)
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/build
+**/out
+**/coverage
+**/.vitest
+**/.turbo
+**/*.tsbuildinfo
+
+# Local environment files and credentials
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.ppk
+
+# Logs and editor/OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Documentation and infrastructure notes are not needed at build time
+docs
+tests
+Dockerfile
+Dockerfile.*
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore

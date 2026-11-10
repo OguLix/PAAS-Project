@@ -88,10 +88,10 @@ The tree in section 2 is the target. Current implementation status:
 | `app/(auth)/layout.tsx`, `(auth)/login`, `(auth)/register` | Implemented |
 | `app/(dashboard)/layout.tsx`, `(dashboard)/dashboard` | Implemented |
 | `components/ui/` | button, input, label, field, alert, card, skeleton |
-| `components/layout/` | topbar, user-menu, nav-items, dashboard-shell, mock-notice (sidebar is the agreed target, not yet implemented) |
+| `components/layout/` | topbar, user-menu, nav-items, dashboard-shell (sidebar is the agreed target, not yet implemented) |
 | `components/feedback/` | loading-state, empty-state, error-state |
 | `features/auth/` | schema, login-form, register-form, session-store, session-guard |
-| `services/` | `auth.api.ts`, `auth.types.ts`, `mock/auth.mock.ts` |
+| `services/` | `auth.api.ts`, `auth.types.ts`, `mock/auth.mock.ts` (test fixture only) |
 | `app/(dashboard)/applications/` | Application list, create, detail, edit, archive and deployment request |
 | `app/(dashboard)/deployments/` | Deployment status, automatic polling, timestamps and bounded logs |
 | `features/applications/`, `features/deployments/` | Forms, lifecycle status badge, history and monitoring availability state |
@@ -168,22 +168,15 @@ Two behaviours follow from the contract as written and are implemented as such:
 - A `403 REGISTRATION_CLOSED` from `POST /auth/register` is a normal outcome while `REGISTRATION_MODE`
   is `closed`, so the form reports it directly instead of a generic failure.
 
-## 9. Mock API
+## 9. Authentication data source
 
-The authentication screens need to be usable before the endpoints exist. `services/auth.api.ts` picks
-between the real client and `services/mock/auth.mock.ts`:
+The dashboard always calls the real Express API through `services/auth.api.ts`. There is no mock mode
+and no automatic fallback, so a backend that is down is reported as a connection error instead of
+being hidden behind simulated data.
 
-| Situation | Behaviour |
-|---|---|
-| `NEXT_PUBLIC_USE_MOCKS=true` | Mock |
-| `NEXT_PUBLIC_USE_MOCKS=false` | Real API |
-| Unset in development | Mock |
-| Unset in a production build | Real API |
-
-While the mock answers, `components/layout/mock-notice.tsx` renders a visible banner saying the data is
-simulated, and the login page shows the demo credentials. The mock keeps no data in browser storage and
-never claims to be the API. Removing it means deleting `services/mock/`, the flag branch in
-`auth.api.ts`, and this section.
+`services/mock/auth.mock.ts` is kept only as an explicit fixture: a test may import `mockAuthApi`
+directly. No application module imports it, so it can never become the runtime data source. It keeps
+no data in browser storage.
 
 ## 10. Session state
 

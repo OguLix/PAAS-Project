@@ -1,12 +1,15 @@
 import { ApiClientError } from '@/lib/api-client';
+import type { ApiErrorCode } from '@ogulix/shared';
 import type { AuthApi, AuthUser, MeResponse } from '../auth.types';
 
 /**
  * In-memory stand-in for the `/auth/*` endpoints.
  *
- * It exists only because those endpoints are not implemented yet. Every screen
- * calls `services/auth.api.ts`, so deleting this file and the
- * `NEXT_PUBLIC_USE_MOCKS` branch removes the mock completely.
+ * This is an explicit test fixture, not a runtime mode. Production code never
+ * imports it: `services/auth.api.ts` always talks to the Express API, so the
+ * dashboard cannot silently fall back to simulated authentication. Import
+ * `mockAuthApi` directly from a test when a deterministic auth double is
+ * needed.
  *
  * Nothing here is persisted and nothing is shared between browser tabs.
  */
@@ -16,7 +19,7 @@ const DEMO_PASSWORD = 'ogulix-demo-1';
 
 /**
  * The real API returns 403 while REGISTRATION_MODE=closed, which is the default.
- * Flip this to true only to explore the registration success path locally.
+ * Flip this to true only to explore the registration success path in a test.
  */
 const REGISTRATION_OPEN = false;
 
@@ -29,7 +32,7 @@ function delay(ms = 300): Promise<void> {
   });
 }
 
-function fail(code: ApiClientError['code'], message: string, status: number): never {
+function fail(code: ApiErrorCode, message: string, status: number): never {
   throw new ApiClientError(message, code, status, 'mock');
 }
 
@@ -42,13 +45,6 @@ function seedDemoUser(): void {
     password: DEMO_PASSWORD,
     user: { id: 'mock-user-1', email: DEMO_EMAIL, role: 'USER' },
   });
-}
-
-export function isMockEnabled(): boolean {  
-    return false;
-
-  // Unset: on for local development, always off for a production build.
-  return process.env.NODE_ENV !== 'production';
 }
 
 export const mockAuthApi: AuthApi = {

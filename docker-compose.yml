@@ -1,9 +1,210 @@
-version: '3.8'
+# OguLix PaaS control plane (local / single-host).
+#
+# Services: frontend, backend, worker, MariaDB, Redis and a one-shot migration
+# runner. This stack is the CONTROL PLANE only. User applications are built and
+# run by the worker on the runtime nodes, never by this file.
+#
+# Prerequisites:
+#   cp .env.example .env      # then fill every placeholder
+#   docker compose up --build
+#
+# Dashboard:  http://localhost:3000
+# API:        http://localhost:3001/api/v1/health
+#
+# Nothing here publishes port 80/443, and MariaDB/Redis are not published at
+# all: they are reachable only on the internal `control-plane` network.
+#
+# This file does not target the IAAS VMs. Applying it to Server 1/2/3 requires a
+# separate, approved deployment plan.
+name: ogulix-control-plane
+
+x-control-plane-environment: &control-plane-environment
+  # HTTP on localhost is only accepted while NODE_ENV is not `production`
+  # (see backend/src/config/env.ts). A real deployment must set NODE_ENV=production
+  # and an HTTPS APP_ORIGIN.
+  NODE_ENV: development
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  RUNTIME_MODE: ${RUNTIME_MODE:-mock}
+  APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
+  # Container-to-container hostnames. Never `localhost`: inside the network each
+  # service talks to the other by service name.
+  DATABASE_URL: mysql://${MARIADB_USER:?set MARIADB_USER in .env}:${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}@mariadb:3306/${MARIADB_DATABASE:?set MARIADB_DATABASE in .env}
+  REDIS_URL: redis://redis:6379
+  SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-ogulix_session}
+  SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+  SESSION_IDLE_HOURS: ${SESSION_IDLE_HOURS:-24}
+  REGISTRATION_MODE: ${REGISTRATION_MODE:-closed}
+  ENV_ENCRYPTION_KEY: ${ENV_ENCRYPTION_KEY:?set ENV_ENCRYPTION_KEY in .env (base64-encoded 32 bytes)}
 
 services:
-  frontend:
-    build: .
-    container_name: react_app
-    restart: always
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?set MARIADB_DATABASE in .env}
+      MARIADB_USER: ${MARIADB_USER:?set MARIADB_USER in .env}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?set MARIADB_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in .env}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - control-plane
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    # BullMQ requires an eviction policy of `noeviction`. Local data is not
+    # persisted, which is intentional for the MVP queue.
+    command:
+      ['redis-server', '--save', '', '--appendonly', 'no', '--maxmemory-policy', 'noeviction']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - control-plane
+
+  # Applies committed migrations once per `up`. Exits 0 when the schema is
+  # already current, so it is safe to re-run. Never point this at production.
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: ogulix-control-plane-migrate:local
+    restart: 'no'
+    environment:
+      <<: *control-plane-environment
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - control-plane
+
+  backend:
+    build:
+      context: .
+      target: backend
+    image: ogulix-control-plane-backend:local
+    restart: unless-stopped
+    environment:
+      <<: *control-plane-environment
+      API_PORT: 3001
     ports:
-      - "80:80"
+      # Bound to the loopback interface of the host by default. Change
+      # API_BIND_ADDRESS only with an approved ingress plan.
+      - '${API_BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3001}:3001'
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - control-plane
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: ogulix-control-plane-worker:local
+    restart: unless-stopped
+    environment:
+      <<: *control-plane-environment
+      QUEUE_NAME: ${QUEUE_NAME:-deployments}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # The worker exposes no HTTP port, so readiness is the Redis connection and
+      # liveness is the node process (PID 1) itself.
+      test: ['CMD', 'node', '-e', 'process.kill(1, 0)']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - control-plane
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+      args:
+        # Next.js inlines NEXT_PUBLIC_* at build time. The browser reaches the
+        # API through the host port published by the `backend` service.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
+    image: ogulix-control-plane-frontend:local
+    restart: unless-stopped
+    ports:
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000'
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - control-plane
+
+  # Optional local tooling. Runs only when requested:
+  #   docker compose --profile tools run --rm seed
+  seed:
+    profiles: ['tools']
+    build:
+      context: .
+      target: seed
+    image: ogulix-control-plane-seed:local
+    restart: 'no'
+    environment:
+      <<: *control-plane-environment
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+      SEED_ADMIN_RESET_PASSWORD: ${SEED_ADMIN_RESET_PASSWORD:-false}
+      SEED_ALLOW_PRODUCTION: 'false'
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - control-plane
+
+volumes:
+  mariadb-data:
+
+networks:
+  control-plane:
+    driver: bridge
