@@ -1,11 +1,11 @@
 import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
-import type {
-  ApplicationResponse,
-  CreateApplicationInput,
-  UpdateApplicationInput,
+import {
+  ACTIVE_DEPLOYMENT_STATUSES,
+  type CreateApplicationInput,
+  type UpdateApplicationInput,
 } from '@ogulix/shared';
-import { conflict, notFound } from '../../common/errors/http-error';
+import { conflict, invalidState, notFound } from '../../common/errors/http-error';
 import type {
   ApplicationListQuery,
   ApplicationRecord,
@@ -44,15 +44,6 @@ function toRecord(
   };
 }
 
-function toResponse(record: ApplicationRecord): ApplicationResponse {
-  const { ownerId: _ownerId, createdAt, updatedAt, ...application } = record;
-  return {
-    ...application,
-    createdAt: createdAt.toISOString(),
-    updatedAt: updatedAt.toISOString(),
-  };
-}
-
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
@@ -64,7 +55,7 @@ function isRecordNotFoundError(error: unknown): boolean {
 export class PrismaApplicationRepository implements ApplicationRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async list(query: ApplicationListQuery): Promise<ApplicationResponse[]> {
+  async list(query: ApplicationListQuery): Promise<ApplicationRecord[]> {
     const applications = await this.prisma.application.findMany({
       where: { status: 'ACTIVE', ...(query.ownerId ? { ownerId: query.ownerId } : {}) },
       include: currentDeploymentSelection,
@@ -72,7 +63,7 @@ export class PrismaApplicationRepository implements ApplicationRepository {
       skip: query.skip,
       take: query.take,
     });
-    return applications.map((application) => toResponse(toRecord(application)));
+    return applications.map(toRecord);
   }
 
   count(ownerId?: string): Promise<number> {
@@ -87,6 +78,16 @@ export class PrismaApplicationRepository implements ApplicationRepository {
       include: currentDeploymentSelection,
     });
     return application ? toRecord(application) : null;
+  }
+
+  async hasActiveDeployments(applicationId: string): Promise<boolean> {
+    const count = await this.prisma.deployment.count({
+      where: {
+        applicationId,
+        status: { in: [...ACTIVE_DEPLOYMENT_STATUSES] },
+      },
+    });
+    return count > 0;
   }
 
   async create(ownerId: string, input: CreateApplicationInput): Promise<ApplicationRecord> {
@@ -122,12 +123,26 @@ export class PrismaApplicationRepository implements ApplicationRepository {
 
   async archive(applicationId: string): Promise<ApplicationRecord> {
     try {
-      const application = await this.prisma.application.update({
-        where: { id: applicationId, status: 'ACTIVE' },
-        data: { status: 'ARCHIVED' },
-        include: currentDeploymentSelection,
+      return await this.prisma.$transaction(async (transaction) => {
+        const activeCount = await transaction.deployment.count({
+          where: {
+            applicationId,
+            status: { in: [...ACTIVE_DEPLOYMENT_STATUSES] },
+          },
+        });
+        if (activeCount > 0) {
+          throw invalidState(
+            'Cannot archive an application with an active deployment; stop or cancel it first',
+          );
+        }
+
+        const application = await transaction.application.update({
+          where: { id: applicationId, status: 'ACTIVE' },
+          data: { status: 'ARCHIVED' },
+          include: currentDeploymentSelection,
+        });
+        return toRecord(application);
       });
-      return toRecord(application);
     } catch (error) {
       if (isRecordNotFoundError(error)) {
         throw notFound('Application not found');

@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import {
+  ACTIVE_DEPLOYMENT_STATUSES,
   DEFAULT_APPLICATION_CONFIG,
-  type ApplicationResponse,
   type CreateApplicationInput,
   type CreateDomainInput,
+  type DeploymentJobPayload,
+  type DeploymentStatus,
   type UpdateApplicationInput,
   type AuthUser,
 } from '@ogulix/shared';
+import { generateEncryptionKey } from '@ogulix/shared/server/crypto';
 import type { AppEnv } from '../src/config/env';
 import { loadEnv } from '../src/config/env';
 import { createApp } from '../src/app';
@@ -24,8 +27,24 @@ import type {
   SessionRecord,
 } from '../src/modules/auth/auth.repository';
 import { AuthService } from '../src/modules/auth/auth.service';
+import type { DeploymentQueueProducer } from '../src/modules/deployments/deployment.queue';
+import type {
+  DeploymentLogQuery,
+  DeploymentLogRecord,
+  DeploymentRecord,
+  DeploymentRepository,
+  NewDeploymentRecord,
+} from '../src/modules/deployments/deployment.repository';
+import { DeploymentService } from '../src/modules/deployments/deployment.service';
 import type { DomainRecord, DomainRepository } from '../src/modules/domains/domain.repository';
 import { DomainService } from '../src/modules/domains/domain.service';
+import type {
+  EnvironmentVariableRecord,
+  EnvironmentVariableRepository,
+} from '../src/modules/env/env.repository';
+import { EnvironmentVariableService } from '../src/modules/env/env.service';
+import type { NodeRepository, RuntimeNodeRecord } from '../src/modules/nodes/node.repository';
+import { NodeService } from '../src/modules/nodes/node.service';
 
 class ApiAuthRepository implements AuthRepository {
   private readonly users = new Map<string, AuthUserRecord>();
@@ -96,18 +115,120 @@ class ApiAuthRepository implements AuthRepository {
   ): Promise<void> {}
 }
 
+class ApiDeploymentRepository implements DeploymentRepository {
+  readonly records = new Map<string, DeploymentRecord>();
+  readonly logs: DeploymentLogRecord[] = [];
+
+  async listByApplication(
+    applicationId: string,
+    query: { skip: number; take: number },
+  ): Promise<DeploymentRecord[]> {
+    return [...this.records.values()]
+      .filter((record) => record.applicationId === applicationId)
+      .slice(query.skip, query.skip + query.take);
+  }
+
+  async countByApplication(applicationId: string): Promise<number> {
+    return [...this.records.values()].filter((record) => record.applicationId === applicationId)
+      .length;
+  }
+
+  async findById(deploymentId: string): Promise<DeploymentRecord | null> {
+    return this.records.get(deploymentId) ?? null;
+  }
+
+  async findByIdempotencyKey(
+    applicationId: string,
+    idempotencyKey: string,
+  ): Promise<DeploymentRecord | null> {
+    return (
+      [...this.records.values()].find(
+        (record) =>
+          record.applicationId === applicationId && record.idempotencyKey === idempotencyKey,
+      ) ?? null
+    );
+  }
+
+  async create(input: NewDeploymentRecord): Promise<DeploymentRecord> {
+    const record: DeploymentRecord = {
+      id: `dep-${this.records.size + 1}`,
+      applicationId: input.applicationId,
+      runtimeNodeId: null,
+      status: 'QUEUED',
+      branch: input.branch,
+      commitSha: input.commitSha,
+      idempotencyKey: input.idempotencyKey,
+      requestFingerprint: input.requestFingerprint,
+      requestedByUserId: input.requestedByUserId,
+      errorCode: null,
+      createdAt: new Date(),
+      startedAt: null,
+      finishedAt: null,
+    };
+    this.records.set(record.id, record);
+    return record;
+  }
+
+  async transitionStatus(
+    deploymentId: string,
+    from: DeploymentStatus,
+    to: DeploymentStatus,
+    extra: {
+      errorCode?: string | null;
+      finishedAt?: Date | null;
+    } = {},
+  ): Promise<DeploymentRecord | null> {
+    const current = this.records.get(deploymentId);
+    if (!current || current.status !== from) {
+      return null;
+    }
+    const updated: DeploymentRecord = {
+      ...current,
+      status: to,
+      errorCode: extra.errorCode !== undefined ? extra.errorCode : current.errorCode,
+      finishedAt: extra.finishedAt !== undefined ? extra.finishedAt : current.finishedAt,
+    };
+    this.records.set(deploymentId, updated);
+    return updated;
+  }
+
+  async listLogsByDeployment(
+    deploymentId: string,
+    query: DeploymentLogQuery,
+  ): Promise<DeploymentLogRecord[]> {
+    return this.logs
+      .filter(
+        (entry) =>
+          entry.deploymentId === deploymentId &&
+          (query.after === undefined || entry.sequence > query.after),
+      )
+      .slice(0, query.limit);
+  }
+
+  async listLogsByApplication(
+    applicationId: string,
+    query: DeploymentLogQuery,
+  ): Promise<DeploymentLogRecord[]> {
+    const latest = [...this.records.values()]
+      .filter((record) => record.applicationId === applicationId)
+      .at(-1);
+    return latest ? this.listLogsByDeployment(latest.id, query) : [];
+  }
+}
+
 class ApiApplicationRepository implements ApplicationRepository {
   private readonly records = new Map<string, ApplicationRecord>();
 
-  async list(query: ApplicationListQuery): Promise<ApplicationResponse[]> {
+  constructor(private readonly deployments: ApiDeploymentRepository) {}
+
+  async list(query: ApplicationListQuery): Promise<ApplicationRecord[]> {
     return [...this.records.values()]
       .filter(
         (application) =>
           application.status === 'ACTIVE' &&
           (!query.ownerId || application.ownerId === query.ownerId),
       )
-      .slice(query.skip, query.skip + query.take)
-      .map((application) => this.toResponse(application));
+      .slice(query.skip, query.skip + query.take);
   }
 
   async count(ownerId?: string): Promise<number> {
@@ -120,6 +241,14 @@ class ApiApplicationRepository implements ApplicationRepository {
   async findActiveById(applicationId: string): Promise<ApplicationRecord | null> {
     const application = this.records.get(applicationId);
     return application?.status === 'ACTIVE' ? application : null;
+  }
+
+  async hasActiveDeployments(applicationId: string): Promise<boolean> {
+    return [...this.deployments.records.values()].some(
+      (deployment) =>
+        deployment.applicationId === applicationId &&
+        (ACTIVE_DEPLOYMENT_STATUSES as readonly string[]).includes(deployment.status),
+    );
   }
 
   async create(ownerId: string, input: CreateApplicationInput): Promise<ApplicationRecord> {
@@ -156,26 +285,6 @@ class ApiApplicationRepository implements ApplicationRepository {
     const archived = { ...application, status: 'ARCHIVED' as const, updatedAt: new Date() };
     this.records.set(applicationId, archived);
     return archived;
-  }
-
-  private toResponse(application: ApplicationRecord): ApplicationResponse {
-    return {
-      id: application.id,
-      name: application.name,
-      sourceRepository: application.sourceRepository,
-      defaultBranch: application.defaultBranch,
-      dockerfilePath: application.dockerfilePath,
-      buildContext: application.buildContext,
-      internalPort: application.internalPort,
-      healthCheckPath: application.healthCheckPath,
-      cpuCores: application.cpuCores,
-      memoryMb: application.memoryMb,
-      pidsLimit: application.pidsLimit,
-      status: application.status,
-      currentDeploymentId: application.currentDeploymentId,
-      createdAt: application.createdAt.toISOString(),
-      updatedAt: application.updatedAt.toISOString(),
-    };
   }
 }
 
@@ -214,11 +323,71 @@ class ApiDomainRepository implements DomainRepository {
   }
 }
 
-function createTestApp(): { app: ReturnType<typeof createApp>; env: AppEnv } {
+class ApiEnvRepository implements EnvironmentVariableRepository {
+  readonly stored = new Map<string, EnvironmentVariableRecord & { encryptedValue: string }>();
+
+  async listByApplication(applicationId: string): Promise<EnvironmentVariableRecord[]> {
+    return [...this.stored.values()]
+      .filter((item) => item.applicationId === applicationId)
+      .map(({ encryptedValue: _encryptedValue, ...summary }) => summary);
+  }
+
+  async upsert(
+    applicationId: string,
+    key: string,
+    encryptedValue: string,
+    isSecret: boolean,
+  ): Promise<EnvironmentVariableRecord> {
+    const mapKey = `${applicationId}:${key}`;
+    const existing = this.stored.get(mapKey);
+    const now = new Date();
+    const record = {
+      id: existing?.id ?? `env-${this.stored.size + 1}`,
+      applicationId,
+      key,
+      encryptedValue,
+      isSecret,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.stored.set(mapKey, record);
+    const { encryptedValue: _encrypted, ...summary } = record;
+    return summary;
+  }
+
+  async deleteByKey(applicationId: string, key: string): Promise<boolean> {
+    return this.stored.delete(`${applicationId}:${key}`);
+  }
+}
+
+class ApiNodeRepository implements NodeRepository {
+  async list(): Promise<RuntimeNodeRecord[]> {
+    const now = new Date();
+    return [
+      {
+        id: 'node-1',
+        name: 'mock-node-1',
+        status: 'ONLINE',
+        capacityCpuMillicores: 2000,
+        capacityMemoryMb: 2048,
+        lastHeartbeatAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+  }
+}
+
+function createTestApp(): {
+  app: ReturnType<typeof createApp>;
+  env: AppEnv;
+  enqueued: DeploymentJobPayload[];
+} {
   const env = loadEnv({
     NODE_ENV: 'test',
     REGISTRATION_MODE: 'open',
     REDIS_URL: 'redis://127.0.0.1:6379',
+    ENV_ENCRYPTION_KEY: generateEncryptionKey(),
   });
   const authRepository = new ApiAuthRepository();
   let tokenNumber = 0;
@@ -229,16 +398,35 @@ function createTestApp(): { app: ReturnType<typeof createApp>; env: AppEnv } {
     },
     createToken: () => `${'a'.repeat(42)}${++tokenNumber}`,
   });
-  const applicationRepository = new ApiApplicationRepository();
+  const deploymentRepository = new ApiDeploymentRepository();
+  const applicationRepository = new ApiApplicationRepository(deploymentRepository);
   const applicationService = new ApplicationService(applicationRepository);
   const domainService = new DomainService(new ApiDomainRepository(), applicationService);
+  const enqueued: DeploymentJobPayload[] = [];
+  const queue: DeploymentQueueProducer = {
+    async enqueue(payload) {
+      enqueued.push(payload);
+    },
+  };
+  const deploymentService = new DeploymentService(deploymentRepository, applicationService, queue);
+  const envService = new EnvironmentVariableService(
+    new ApiEnvRepository(),
+    applicationService,
+    env,
+  );
+  const nodeService = new NodeService(new ApiNodeRepository());
   return {
     env,
+    enqueued,
     app: createApp(env, {
       authService,
       applicationService,
       domainService,
+      deploymentService,
+      envService,
+      nodeService,
       checkDatabase: async () => {},
+      checkQueue: async () => {},
     }),
   };
 }
@@ -409,5 +597,53 @@ describe('Backend 1 API', () => {
       .send({ hostname: 'example.com' });
     expect(invalidDomain.status).toBe(400);
     expect(invalidDomain.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('supports deployments, encrypted env variables, nodes, and archive guards', async () => {
+    const { app, env, enqueued } = createTestApp();
+    await request(app)
+      .post('/api/v1/auth/register')
+      .set('Origin', env.APP_ORIGIN)
+      .send({ email: 'owner@example.test', password: 'secure-password' });
+
+    const createdApp = await request(app)
+      .post('/api/v1/applications')
+      .set('Origin', env.APP_ORIGIN)
+      .set('Cookie', sessionCookie(1))
+      .send({
+        name: 'demo',
+        sourceRepository: 'https://github.com/ogulix/demo.git',
+        defaultBranch: 'main',
+      });
+    const appId = createdApp.body.data.id as string;
+
+    const deployed = await request(app)
+      .post(`/api/v1/applications/${appId}/deployments`)
+      .set('Origin', env.APP_ORIGIN)
+      .set('Cookie', sessionCookie(1))
+      .set('Idempotency-Key', 'deploy-key-0001')
+      .send({});
+    expect(deployed.status).toBe(202);
+    expect(enqueued).toHaveLength(1);
+
+    const archiveBlocked = await request(app)
+      .delete(`/api/v1/applications/${appId}`)
+      .set('Origin', env.APP_ORIGIN)
+      .set('Cookie', sessionCookie(1));
+    expect(archiveBlocked.status).toBe(409);
+    expect(archiveBlocked.body.error.code).toBe('INVALID_STATE');
+
+    const putEnv = await request(app)
+      .put(`/api/v1/applications/${appId}/env/API_SECRET`)
+      .set('Origin', env.APP_ORIGIN)
+      .set('Cookie', sessionCookie(1))
+      .send({ value: 'top-secret-value', isSecret: true });
+    expect(putEnv.status).toBe(200);
+    expect(JSON.stringify(putEnv.body)).not.toContain('top-secret-value');
+
+    const nodes = await request(app).get('/api/v1/nodes').set('Cookie', sessionCookie(1));
+    expect(nodes.status).toBe(200);
+    expect(nodes.body.data[0].name).toBe('mock-node-1');
+    expect(nodes.body.data[0].host).toBeUndefined();
   });
 });

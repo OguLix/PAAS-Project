@@ -241,3 +241,4 @@ filesystem, because both can break ordinary application images.
 |---|---|---|
 | 2026-11-01 | Initial decision record created; Server 1 memory raised to 4 GiB; API, data model, logging, auth, routing and tooling decisions locked | Project owner |
 | 2026-11-08 | Pre-IAAS Sprint A: deployment config columns, restart/new-attempt semantics, one-running rule, archive `409`, idempotency fingerprint, log counters, server-only shared boundary, seed policy, SSRF guard and deployment log endpoint frozen | Project owner |
+| 2026-11-24 | Audit & Sprint B: per-app ceilings tightened to `1.5` CPU / `1024 MiB` for 2 GiB runtime VMs, log query cap aligned to `100` (B7e), `buildContext` added to `BuildRequest`, `allocatedPort` cleared on terminal stop/fail for port reuse, backend deployments/env/nodes APIs, mock worker pipeline, and dashboard UI completed | Project owner |

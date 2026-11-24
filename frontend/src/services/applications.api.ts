@@ -60,8 +60,11 @@ export const applicationsApi = {
   async deploy(
     applicationId: string,
     input: { branch?: string; commitSha?: string },
+    idempotencyKey?: string,
   ): Promise<DeploymentResponse> {
-    const headers = new Headers({ 'Idempotency-Key': crypto.randomUUID() });
+    const headers = new Headers({
+      'Idempotency-Key': idempotencyKey ?? crypto.randomUUID(),
+    });
     const response = await apiRequest<DeploymentResponse>(
       `${applicationPath(applicationId)}/deployments`,
       {
@@ -74,7 +77,7 @@ export const applicationsApi = {
   },
 
   async logs(applicationId: string, after?: number): Promise<DeploymentLogEntry[]> {
-    const query = new URLSearchParams({ limit: '200' });
+    const query = new URLSearchParams({ limit: '100' });
     if (after !== undefined) {
       query.set('after', String(after));
     }

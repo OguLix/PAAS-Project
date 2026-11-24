@@ -1,3 +1,5 @@
+import { redactObject, redactText } from '@ogulix/shared/server/redaction';
+
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const SEVERITY: Record<LogLevel, number> = {
@@ -26,9 +28,9 @@ function emit(level: LogLevel, message: string, context: LogContext = {}): void 
 
   const line = JSON.stringify({
     level,
-    message,
+    message: redactText(message),
     time: new Date().toISOString(),
-    ...context,
+    ...redactObject(context),
   });
 
   if (level === 'error' || level === 'warn') {

@@ -64,7 +64,7 @@ describe('RegisterForm', () => {
     expect(await screen.findByText('Registration is closed for this workspace.')).toBeTruthy();
   });
 
-  it('sends the user to the sign in page after a successful registration', async () => {
+  it('opens the dashboard after a successful registration', async () => {
     const user = userEvent.setup();
     register.mockResolvedValueOnce({
       user: { id: 'user-2', email: 'new@ogulix.test', role: 'USER' },
@@ -77,7 +77,7 @@ describe('RegisterForm', () => {
     await user.click(screen.getByRole('button', { name: 'Create account' }));
 
     await waitFor(() => {
-      expect(replace).toHaveBeenCalledWith('/login?registered=1');
+      expect(replace).toHaveBeenCalledWith('/dashboard');
     });
   });
 });

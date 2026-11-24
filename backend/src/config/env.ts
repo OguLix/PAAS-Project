@@ -28,9 +28,11 @@ const envSchema = z
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
     APP_ORIGIN: z.url().default('http://localhost:3000'),
     RUNTIME_MODE: z.enum(['mock', 'iaas']).default('mock'),
+    TRUST_PROXY: z.coerce.number().int().min(0).max(5).default(0),
 
     DATABASE_URL: z.string().min(1).optional(),
     REDIS_URL: z.string().min(1).optional(),
+    QUEUE_NAME: z.string().min(1).max(64).default('deployments'),
 
     SESSION_COOKIE_NAME: z
       .string()

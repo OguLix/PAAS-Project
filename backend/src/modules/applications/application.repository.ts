@@ -18,9 +18,10 @@ export type ApplicationListQuery = {
 };
 
 export interface ApplicationRepository {
-  list(query: ApplicationListQuery): Promise<ApplicationResponse[]>;
+  list(query: ApplicationListQuery): Promise<ApplicationRecord[]>;
   count(ownerId?: string): Promise<number>;
   findActiveById(applicationId: string): Promise<ApplicationRecord | null>;
+  hasActiveDeployments(applicationId: string): Promise<boolean>;
   create(ownerId: string, input: CreateApplicationInput): Promise<ApplicationRecord>;
   update(applicationId: string, input: UpdateApplicationInput): Promise<ApplicationRecord>;
   archive(applicationId: string): Promise<ApplicationRecord>;

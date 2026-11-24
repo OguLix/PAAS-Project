@@ -61,6 +61,17 @@ describe('log redaction', () => {
     expect(redacted.nested[1]).not.toContain('value');
     expect(metadata.databaseUrl).toContain('pass');
   });
+
+  it('redacts session cookies and inline URL credentials', () => {
+    const raw =
+      'Cookie: ogulix_session=abc123secret; other=1\nConnecting to mysql://admin:s3cr3t@127.0.0.1:3306/db';
+    const redacted = redactText(raw);
+
+    expect(redacted).not.toContain('abc123secret');
+    expect(redacted).not.toContain('s3cr3t');
+    expect(redacted).toContain('Cookie: [REDACTED]');
+    expect(redacted).toContain('mysql://[REDACTED]@127.0.0.1:3306/db');
+  });
 });
 
 describe('deployment state guard', () => {

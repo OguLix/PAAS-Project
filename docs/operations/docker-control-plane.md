@@ -97,9 +97,9 @@ overwrites a client. The flow is:
 1. `build` runs `prisma generate` and asserts `node_modules/.prisma/client/index.js` exists.
 2. `prod-deps` installs runtime dependencies only; the `prisma` CLI is a dev dependency and is not
    present.
-3. `backend` copies the generated `node_modules/.prisma` from `build` on top of the production
-   `node_modules`. `@prisma/client` resolves `.prisma/client` at require time, so the generated client
-   is the one that runs.
+3. `backend` and `worker` copy the generated `node_modules/.prisma` from `build` on top of the
+   production `node_modules`. `@prisma/client` resolves `.prisma/client` at require time, so the
+   generated client is the one that runs.
 4. `migrate` and `seed` come from `build` because they need the CLI and the TypeScript runner.
 
 ## Commands

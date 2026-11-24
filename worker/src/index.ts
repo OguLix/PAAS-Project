@@ -1,22 +1,22 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
+import type { Worker } from 'bullmq';
 import Redis from 'ioredis';
-import { DEPLOYMENT_STATUSES, NODE_COMMANDS } from '@ogulix/shared';
+import type { PrismaClient } from '@prisma/client';
+import { DEPLOYMENT_STATUSES, NODE_COMMANDS, type DeploymentJobPayload } from '@ogulix/shared';
+import { createPrismaClient } from '@ogulix/shared/server/prisma';
+import { BuildkitAdapter } from './adapters/buildkit.adapter';
+import { DockerAdapter } from './adapters/docker.adapter';
+import { MockSshAdapter, SshAdapter } from './adapters/ssh.adapter';
+import { MockTraefikConfigAdapter, TraefikConfigAdapter } from './adapters/traefik-config.adapter';
 import { loadEnv } from './config/env';
 import { logger, setLogLevel } from './logging';
+import { createDeploymentProcessor } from './processors/deployment.processor';
+import { PrismaWorkerDeploymentRepository } from './repositories/prisma-deployment.repository';
+import { BuildService } from './services/build-service';
+import { DeploymentOrchestrator } from './services/deployment-orchestrator';
+import { HealthCheckService } from './services/health-check-service';
+import { NodeScheduler } from './services/node-scheduler';
 
-/**
- * Worker entry point.
- *
- * Scope: process wiring and queue connectivity only. Registering a BullMQ
- * processor is deliberately out of scope. `RUNTIME_MODE` is a worker runtime
- * setting and is unrelated to the dashboard Mock API, which no longer exists.
- *
- * Connection policy:
- * - exactly one Redis client, never one per attempt;
- * - reconnects use a bounded budget with exponential backoff;
- * - when the budget is exhausted the process exits non-zero so the container
- *   restart policy can recover it instead of staying up without a queue.
- */
 const env = loadEnv();
 setLogLevel(env.LOG_LEVEL);
 
@@ -27,6 +27,9 @@ const CONNECT_TIMEOUT_MS = 5000;
 const IDLE_LOG_INTERVAL_MS = 60000;
 
 let connection: Redis | null = null;
+let bullConnection: Redis | null = null;
+let bullWorker: Worker<DeploymentJobPayload> | null = null;
+let prisma: PrismaClient | null = null;
 let idleTimer: NodeJS.Timeout | null = null;
 let stopping = false;
 let ready = false;
@@ -40,16 +43,13 @@ logger.info('worker starting', {
   deploymentStatuses: DEPLOYMENT_STATUSES.length,
   nodeCommands: NODE_COMMANDS.length,
   queueConfigured: Boolean(env.REDIS_URL),
+  databaseConfigured: Boolean(env.DATABASE_URL),
 });
 
 function reconnectDelayMs(attempt: number): number {
   return Math.min(BASE_RECONNECT_DELAY_MS * 2 ** (attempt - 1), MAX_RECONNECT_DELAY_MS);
 }
 
-/**
- * Exits non-zero when the queue connection cannot be recovered. Docker restarts
- * the container, which re-runs the bounded startup sequence.
- */
 function stopWithFailure(reason: string): void {
   ready = false;
   logger.error('worker exiting without a queue connection', {
@@ -59,13 +59,11 @@ function stopWithFailure(reason: string): void {
   process.exit(1);
 }
 
-function createClient(url: string): Redis {
+function createProbeClient(url: string): Redis {
   const client = new Redis(url, {
     lazyConnect: true,
     connectTimeout: CONNECT_TIMEOUT_MS,
     maxRetriesPerRequest: 1,
-    // Nothing is queued locally: no processor is registered yet, and failing
-    // fast is safer than replaying stale commands after a long outage.
     enableOfflineQueue: false,
     retryStrategy: (attempt) => {
       if (stopping) {
@@ -126,7 +124,6 @@ function createClient(url: string): Redis {
   });
 
   client.on('error', (error: Error) => {
-    // The URL carries credentials, so only the error identity is logged.
     logger.warn('queue client error', {
       error: error.name,
       code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN',
@@ -137,7 +134,6 @@ function createClient(url: string): Redis {
   return client;
 }
 
-/** Resolves true on `ready`, false on `end`. */
 function waitForReady(client: Redis): Promise<boolean> {
   if (client.status === 'ready') {
     return Promise.resolve(true);
@@ -168,10 +164,9 @@ async function start(): Promise<void> {
   if (!env.REDIS_URL) {
     logger.warn('worker queue connection skipped', { reason: 'REDIS_URL is not configured' });
   } else {
-    const client = createClient(env.REDIS_URL);
+    const client = createProbeClient(env.REDIS_URL);
     connection = client;
 
-    // Listen before connecting so the first `ready`/`end` cannot be missed.
     const becameReady = waitForReady(client);
 
     void client.connect().catch((error: unknown) => {
@@ -184,7 +179,6 @@ async function start(): Promise<void> {
     const connected = await becameReady;
 
     if (!connected) {
-      // The `end` handler owns the exit; nothing else should keep running.
       return;
     }
 
@@ -195,10 +189,54 @@ async function start(): Promise<void> {
       stopWithFailure(error instanceof Error ? error.name : 'QueuePingFailed');
       return;
     }
+
+    if (env.DATABASE_URL) {
+      prisma = createPrismaClient(env.DATABASE_URL);
+      const repository = new PrismaWorkerDeploymentRepository(prisma);
+      const transport = env.RUNTIME_MODE === 'mock' ? new MockSshAdapter() : new SshAdapter();
+      const traefik =
+        env.RUNTIME_MODE === 'mock' ? new MockTraefikConfigAdapter() : new TraefikConfigAdapter();
+      const orchestrator = new DeploymentOrchestrator(
+        repository,
+        new NodeScheduler(),
+        new BuildService(new BuildkitAdapter(transport)),
+        new DockerAdapter(transport),
+        new HealthCheckService(env.RUNTIME_MODE),
+        traefik,
+        { encryptionKey: env.ENV_ENCRYPTION_KEY },
+      );
+
+      // BullMQ blocking workers require maxRetriesPerRequest: null.
+      bullConnection = new Redis(env.REDIS_URL, {
+        maxRetriesPerRequest: null,
+        connectTimeout: CONNECT_TIMEOUT_MS,
+      });
+      bullConnection.on('error', (error: Error) => {
+        logger.warn('bullmq redis connection error', {
+          error: error.name,
+          code: (error as NodeJS.ErrnoException).code ?? 'UNKNOWN',
+        });
+      });
+
+      bullWorker = createDeploymentProcessor(bullConnection, orchestrator, {
+        queueName: env.QUEUE_NAME,
+        concurrency: env.WORKER_CONCURRENCY,
+      });
+      logger.info('deployment processor registered', {
+        queue: env.QUEUE_NAME,
+        concurrency: env.WORKER_CONCURRENCY,
+        runtimeMode: env.RUNTIME_MODE,
+      });
+    } else {
+      logger.warn('deployment processor skipped', { reason: 'DATABASE_URL is not configured' });
+    }
   }
 
   idleTimer = setInterval(() => {
-    logger.debug('worker idle', { queue: env.QUEUE_NAME });
+    logger.debug('worker heartbeat', {
+      queue: env.QUEUE_NAME,
+      processorActive: Boolean(bullWorker),
+    });
   }, IDLE_LOG_INTERVAL_MS);
 }
 
@@ -216,23 +254,27 @@ function shutdown(signal: NodeJS.Signals): void {
     idleTimer = null;
   }
 
-  const client = connection;
-  connection = null;
-
-  if (!client) {
-    process.exit(0);
+  const cleanupTasks: Promise<unknown>[] = [];
+  if (bullWorker) {
+    cleanupTasks.push(bullWorker.close());
+    bullWorker = null;
+  }
+  if (bullConnection) {
+    cleanupTasks.push(bullConnection.quit());
+    bullConnection = null;
+  }
+  if (connection) {
+    cleanupTasks.push(connection.quit());
+    connection = null;
+  }
+  if (prisma) {
+    cleanupTasks.push(prisma.$disconnect());
+    prisma = null;
   }
 
-  void client
-    .quit()
-    .catch((error: unknown) => {
-      logger.warn('queue disconnect failed', {
-        error: error instanceof Error ? error.name : 'UnknownError',
-      });
-    })
-    .finally(() => {
-      process.exit(0);
-    });
+  void Promise.allSettled(cleanupTasks).finally(() => {
+    process.exit(0);
+  });
 }
 
 process.on('SIGINT', shutdown);

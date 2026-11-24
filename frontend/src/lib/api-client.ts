@@ -61,7 +61,7 @@ export async function apiRequest<TData>(
       error?.message ?? 'The API request failed.',
       error?.code ?? 'INTERNAL_ERROR',
       response.status,
-      payload.meta.requestId,
+      payload.meta?.requestId ?? 'unknown',
     );
   }
 

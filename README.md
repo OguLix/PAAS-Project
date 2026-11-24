@@ -169,6 +169,7 @@ VMs.
 - [x] Repository scaffold initialized from `docs/implementation/initialization-blueprint.md` (see `docs/implementation/scaffold-report.md`)
 - [x] Backend 1 initial auth/session, application and domain API with Prisma/MariaDB repositories and generated initial migration
 - [x] Pre-IAAS Sprint A contract freeze, shared DTOs, server-only boundary, schema/migration, seed foundation and tests (see `docs/implementation/pre-iaas-sprint-a.md`)
+- [x] Audit fixes & Sprint B: backend deployments/env/nodes APIs with BullMQ producer, archive `409 INVALID_STATE` guard, real Redis `/ready` check, logger redaction, mock-mode worker pipeline & tests, and frontend deployment/domain/env/node views
 - [ ] Execute the migrations against a disposable MariaDB 11.4 instance; `prisma migrate diff` reports schema/migration parity, but Docker was unavailable in the agent environment
 - [ ] Validate the initial Prisma migration and native enums against a disposable MariaDB 11.4 instance
 - [ ] Server capacity and port preflight (Server 1 memory measured against the 4 GiB budget)
