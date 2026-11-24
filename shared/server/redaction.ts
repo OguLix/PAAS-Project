@@ -20,6 +20,18 @@ const DEFAULT_REDACTION_PATTERNS: ReadonlyArray<{
     replacement: (_match, key) => `${key}=[REDACTED]`,
   },
   {
+    pattern: /\b(https?|mysql|mariadb|redis|rediss):\/\/([^/\s:@]*):([^/\s@]+)@/gi,
+    replacement: (_match, scheme) => `${scheme}://[REDACTED]@`,
+  },
+  {
+    pattern: /\b(ogulix_session)\s*=\s*[^;\s,]+/gi,
+    replacement: (_match, key) => `${key}=[REDACTED]`,
+  },
+  {
+    pattern: /\b(set-cookie|cookie)\s*:\s*[^\r\n]+/gi,
+    replacement: (_match, header) => `${header}: [REDACTED]`,
+  },
+  {
     pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
     replacement: '[REDACTED PRIVATE KEY]',
   },

@@ -25,14 +25,21 @@ export function createDomainRouter(
   router.post('/applications/:applicationId/domains', authenticate, async (request, response) => {
     const applicationId = parseInput(opaqueIdSchema, request.params.applicationId);
     const input = parseInput(createDomainInputSchema, request.body);
-    const domain = await domainService.create(getAuthContext(request), applicationId, input);
-    response.status(201).json(successResponse(domain, response.locals.requestId as string));
+    const requestId = response.locals.requestId as string;
+    const domain = await domainService.create(
+      getAuthContext(request),
+      applicationId,
+      input,
+      requestId,
+    );
+    response.status(201).json(successResponse(domain, requestId));
   });
 
   router.delete('/domains/:domainId', authenticate, async (request, response) => {
     const domainId = parseInput(opaqueIdSchema, request.params.domainId);
-    const domain = await domainService.disable(getAuthContext(request), domainId);
-    response.json(successResponse(domain, response.locals.requestId as string));
+    const requestId = response.locals.requestId as string;
+    const domain = await domainService.disable(getAuthContext(request), domainId, requestId);
+    response.json(successResponse(domain, requestId));
   });
 
   return router;

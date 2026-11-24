@@ -114,16 +114,19 @@ EXPOSE 3001
 CMD ["node", "dist/server.js"]
 
 # ---------------------------------------------------------------------------
-# BullMQ worker. The worker does not use Prisma, so no generated client here.
+# BullMQ worker. Copies the generated Prisma Client so the deployment
+# orchestrator can update deployment statuses and persist build logs.
 # ---------------------------------------------------------------------------
 FROM base AS worker
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/node_modules/.prisma ./node_modules/.prisma
 COPY --chown=node:node shared/package.json ./shared/package.json
 COPY --from=build --chown=node:node /app/shared/dist ./shared/dist
 COPY --chown=node:node worker/package.json ./worker/package.json
 COPY --from=build --chown=node:node /app/worker/dist ./worker/dist
+RUN node -e "require('@prisma/client'); require('/app/shared/dist/server/prisma.js'); console.log('worker prisma client and factory loadable');"
 USER node
 WORKDIR /app/worker
 CMD ["node", "dist/index.js"]

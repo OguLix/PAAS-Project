@@ -10,14 +10,24 @@ import { createApplicationRouter } from './modules/applications/application.rout
 import type { ApplicationService } from './modules/applications/application.service';
 import { createAuthRouter } from './modules/auth/auth.routes';
 import type { AuthService } from './modules/auth/auth.service';
+import { createDeploymentRouter } from './modules/deployments/deployment.routes';
+import type { DeploymentService } from './modules/deployments/deployment.service';
 import { createDomainRouter } from './modules/domains/domain.routes';
 import type { DomainService } from './modules/domains/domain.service';
+import { createEnvironmentVariableRouter } from './modules/env/env.routes';
+import type { EnvironmentVariableService } from './modules/env/env.service';
+import { createNodeRouter } from './modules/nodes/node.routes';
+import type { NodeService } from './modules/nodes/node.service';
 
 export type AppDependencies = {
   authService: AuthService;
   applicationService: ApplicationService;
   domainService: DomainService;
+  deploymentService: DeploymentService;
+  envService: EnvironmentVariableService;
+  nodeService: NodeService;
   checkDatabase: () => Promise<void>;
+  checkQueue: () => Promise<void>;
 };
 
 function isMutatingMethod(method: string): boolean {
@@ -105,6 +115,10 @@ export function createApp(env: AppEnv, dependencies: AppDependencies): express.E
   const app = express();
 
   app.disable('x-powered-by');
+  if (env.TRUST_PROXY > 0) {
+    app.set('trust proxy', env.TRUST_PROXY);
+  }
+
   app.use((_request: Request, response: Response, next: NextFunction) => {
     const requestId = randomUUID();
     response.locals.requestId = requestId;
@@ -141,6 +155,17 @@ export function createApp(env: AppEnv, dependencies: AppDependencies): express.E
       });
     }
 
+    let queueReady = false;
+    try {
+      await dependencies.checkQueue();
+      queueReady = true;
+    } catch (error) {
+      logger.warn('queue readiness check failed', {
+        requestId: response.locals.requestId,
+        error: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+
     const checks: ReadinessCheck[] = [
       {
         name: 'database',
@@ -149,8 +174,8 @@ export function createApp(env: AppEnv, dependencies: AppDependencies): express.E
       },
       {
         name: 'queue',
-        ready: Boolean(env.REDIS_URL),
-        ...(env.REDIS_URL ? {} : { detail: 'REDIS_URL is not configured' }),
+        ready: queueReady,
+        ...(queueReady ? {} : { detail: 'Queue is unavailable' }),
       },
     ];
 
@@ -166,6 +191,18 @@ export function createApp(env: AppEnv, dependencies: AppDependencies): express.E
 
   app.use('/api/v1/auth', createAuthRouter(dependencies.authService, env));
   app.use('/api/v1', createDomainRouter(dependencies.authService, dependencies.domainService, env));
+  app.use(
+    '/api/v1',
+    createDeploymentRouter(dependencies.authService, dependencies.deploymentService, env),
+  );
+  app.use(
+    '/api/v1',
+    createEnvironmentVariableRouter(dependencies.authService, dependencies.envService, env),
+  );
+  app.use(
+    '/api/v1/nodes',
+    createNodeRouter(dependencies.authService, dependencies.nodeService, env),
+  );
   app.use(
     '/api/v1/applications',
     createApplicationRouter(dependencies.authService, dependencies.applicationService, env),

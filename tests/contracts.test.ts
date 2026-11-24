@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACTIVE_DEPLOYMENT_STATUSES,
   DEFAULT_APPLICATION_CONFIG,
   DEPLOYMENT_STATUSES,
   DEPLOYMENT_STATUS_LABELS,
@@ -13,8 +14,11 @@ import {
   deployInputSchema,
   deploymentJobPayloadSchema,
   environmentVariableKeySchema,
+  getDeploymentErrorMessage,
+  isActiveDeploymentStatus,
   isDeploymentStatus,
   isNodeCommand,
+  logQuerySchema,
   loginInputSchema,
   repositoryUrlSchema,
   registerInputSchema,
@@ -191,6 +195,8 @@ describe('application input contract', () => {
       createApplicationInputSchema.safeParse({ ...base, healthCheckPath: 'health' }).success,
     ).toBe(false);
     expect(createApplicationInputSchema.safeParse({ ...base, memoryMb: 32 }).success).toBe(false);
+    expect(createApplicationInputSchema.safeParse({ ...base, memoryMb: 2048 }).success).toBe(false);
+    expect(createApplicationInputSchema.safeParse({ ...base, cpuCores: 2 }).success).toBe(false);
   });
 
   it('rejects unknown fields and unsafe branch names', () => {
@@ -272,5 +278,14 @@ describe('environment and queue contracts', () => {
     expect(
       deploymentJobPayloadSchema.safeParse({ ...base, kind: 'shell', command: 'rm -rf /' }).success,
     ).toBe(false);
+  });
+
+  it('enforces the B7e maximum page size on logs and exposes sanitized deployment error messages', () => {
+    expect(logQuerySchema.parse({}).limit).toBe(100);
+    expect(logQuerySchema.safeParse({ limit: 101 }).success).toBe(false);
+    expect(ACTIVE_DEPLOYMENT_STATUSES).toContain('RUNNING');
+    expect(isActiveDeploymentStatus('STOPPED')).toBe(false);
+    expect(getDeploymentErrorMessage('BUILD_FAILED')).toBeTruthy();
+    expect(getDeploymentErrorMessage('UNKNOWN_CODE')).toBeNull();
   });
 });

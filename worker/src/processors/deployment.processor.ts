@@ -1,29 +1,60 @@
-﻿import { Worker } from 'bullmq';
+import { Worker } from 'bullmq';
 import type { Redis } from 'ioredis';
-import { DEPLOYMENT_QUEUE_NAME } from '../queues/deployment.queue';
+import {
+  DEPLOYMENT_QUEUE_NAME,
+  parseDeploymentJobPayload,
+  type DeploymentJobPayload,
+} from '@ogulix/shared';
 import { logger } from '../logging';
+import type { DeploymentOrchestrator } from '../services/deployment-orchestrator';
 
-export function createDeploymentProcessor(_redis: Redis) {
-  const worker = new Worker(
-    DEPLOYMENT_QUEUE_NAME,
+export type DeploymentProcessorOptions = {
+  queueName?: string;
+  concurrency?: number;
+};
+
+export function createDeploymentProcessor(
+  redis: Redis,
+  orchestrator: DeploymentOrchestrator,
+  options: DeploymentProcessorOptions = {},
+): Worker<DeploymentJobPayload> {
+  const queueName = options.queueName ?? DEPLOYMENT_QUEUE_NAME;
+  const concurrency = options.concurrency ?? 1;
+
+  const worker = new Worker<DeploymentJobPayload>(
+    queueName,
     async (job) => {
-      logger.info('deployment job received', {
+      const payload = parseDeploymentJobPayload(job.data);
+      logger.info('processing deployment job', {
         jobId: job.id,
         jobName: job.name,
+        kind: payload.kind,
+        deploymentId: payload.deploymentId,
+        requestId: payload.requestId,
       });
-      // Scaffold: no processing logic yet.
-      throw new Error('Deployment processor not implemented in scaffold');
+
+      switch (payload.kind) {
+        case 'deploy':
+          await orchestrator.executeDeploy(payload);
+          break;
+        case 'stop':
+          await orchestrator.executeStop(payload);
+          break;
+        case 'restart':
+          await orchestrator.executeRestart(payload);
+          break;
+      }
     },
     {
-      connection: _redis,
-      concurrency: 1,
+      connection: redis,
+      concurrency,
     },
   );
 
   worker.on('failed', (job, error) => {
     logger.error('deployment job failed', {
       jobId: job?.id,
-      error: error.message,
+      error: error.name,
     });
   });
 

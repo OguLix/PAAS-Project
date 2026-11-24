@@ -9,10 +9,14 @@ import type {
   ApplicationRecord,
   ApplicationRepository,
 } from './application.repository';
-import { notFound } from '../../common/errors/http-error';
+import { noopAuditLogger, type AuditLogger } from '../../common/audit/audit-logger';
+import { invalidState, notFound } from '../../common/errors/http-error';
 
 export class ApplicationService {
-  constructor(private readonly repository: ApplicationRepository) {}
+  constructor(
+    private readonly repository: ApplicationRepository,
+    private readonly audit: AuditLogger = noopAuditLogger,
+  ) {}
 
   async list(
     actor: ApplicationActor,
@@ -20,12 +24,12 @@ export class ApplicationService {
     pageSize: number,
   ): Promise<{ applications: ApplicationResponse[]; total: number }> {
     const ownerId = actor.role === 'ADMIN' ? undefined : actor.userId;
-    const [applications, total] = await Promise.all([
+    const [records, total] = await Promise.all([
       this.repository.list({ ownerId, skip: (page - 1) * pageSize, take: pageSize }),
       this.repository.count(ownerId),
     ]);
 
-    return { applications, total };
+    return { applications: records.map((record) => this.toResponse(record)), total };
   }
 
   async get(actor: ApplicationActor, applicationId: string): Promise<ApplicationResponse> {
@@ -37,10 +41,18 @@ export class ApplicationService {
   async create(
     actor: ApplicationActor,
     input: CreateApplicationInput,
+    requestId = 'unknown',
   ): Promise<ApplicationResponse> {
     const application = await this.repository.create(actor.userId, {
       ...DEFAULT_APPLICATION_CONFIG,
       ...input,
+    });
+    await this.audit.record({
+      actorUserId: actor.userId,
+      action: 'application.create',
+      resourceType: 'APPLICATION',
+      resourceId: application.id,
+      requestId,
     });
     return this.toResponse(application);
   }
@@ -49,21 +61,52 @@ export class ApplicationService {
     actor: ApplicationActor,
     applicationId: string,
     input: UpdateApplicationInput,
+    requestId = 'unknown',
   ): Promise<ApplicationResponse> {
     const application = await this.repository.findActiveById(applicationId);
     this.assertAccessible(actor, application);
-    return this.toResponse(await this.repository.update(applicationId, input));
+    const updated = await this.repository.update(applicationId, input);
+    await this.audit.record({
+      actorUserId: actor.userId,
+      action: 'application.update',
+      resourceType: 'APPLICATION',
+      resourceId: applicationId,
+      requestId,
+    });
+    return this.toResponse(updated);
   }
 
-  async archive(actor: ApplicationActor, applicationId: string): Promise<ApplicationResponse> {
+  async archive(
+    actor: ApplicationActor,
+    applicationId: string,
+    requestId = 'unknown',
+  ): Promise<ApplicationResponse> {
     const application = await this.repository.findActiveById(applicationId);
     this.assertAccessible(actor, application);
-    return this.toResponse(await this.repository.archive(applicationId));
+    if (await this.repository.hasActiveDeployments(applicationId)) {
+      throw invalidState(
+        'Cannot archive an application with an active deployment; stop or cancel it first',
+      );
+    }
+
+    const archived = await this.repository.archive(applicationId);
+    await this.audit.record({
+      actorUserId: actor.userId,
+      action: 'application.archive',
+      resourceType: 'APPLICATION',
+      resourceId: applicationId,
+      requestId,
+    });
+    return this.toResponse(archived);
   }
 
-  async assertCanAccess(actor: ApplicationActor, applicationId: string): Promise<void> {
+  async assertCanAccess(
+    actor: ApplicationActor,
+    applicationId: string,
+  ): Promise<ApplicationRecord> {
     const application = await this.repository.findActiveById(applicationId);
     this.assertAccessible(actor, application);
+    return application;
   }
 
   private assertAccessible(

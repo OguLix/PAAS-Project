@@ -35,8 +35,9 @@ export function createApplicationRouter(
 
   router.post('/', async (request, response) => {
     const input = parseInput(createApplicationInputSchema, request.body);
-    const application = await applicationService.create(getAuthContext(request), input);
-    response.status(201).json(successResponse(application, response.locals.requestId as string));
+    const requestId = response.locals.requestId as string;
+    const application = await applicationService.create(getAuthContext(request), input, requestId);
+    response.status(201).json(successResponse(application, requestId));
   });
 
   router.get('/:applicationId', async (request, response) => {
@@ -48,18 +49,25 @@ export function createApplicationRouter(
   router.patch('/:applicationId', async (request, response) => {
     const applicationId = parseInput(opaqueIdSchema, request.params.applicationId);
     const input = parseInput(updateApplicationInputSchema, request.body);
+    const requestId = response.locals.requestId as string;
     const application = await applicationService.update(
       getAuthContext(request),
       applicationId,
       input,
+      requestId,
     );
-    response.json(successResponse(application, response.locals.requestId as string));
+    response.json(successResponse(application, requestId));
   });
 
   router.delete('/:applicationId', async (request, response) => {
     const applicationId = parseInput(opaqueIdSchema, request.params.applicationId);
-    const application = await applicationService.archive(getAuthContext(request), applicationId);
-    response.json(successResponse(application, response.locals.requestId as string));
+    const requestId = response.locals.requestId as string;
+    const application = await applicationService.archive(
+      getAuthContext(request),
+      applicationId,
+      requestId,
+    );
+    response.json(successResponse(application, requestId));
   });
 
   return router;

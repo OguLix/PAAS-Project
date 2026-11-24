@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { messageForError } from '@/lib/errors';
 import { authApi } from '@/services/auth.api';
 import { registerSchema } from './schema';
+import { setAuthenticated } from './session-store';
 
 type FieldErrors = {
   email?: string;
@@ -63,11 +64,13 @@ export function RegisterForm() {
     setPending(true);
 
     try {
-      await authApi.register({ email: parsed.data.email, password: parsed.data.password });
-      // The registration response is not assumed to set a session cookie, so the
-      // user is asked to sign in instead of dropping them into a half-authenticated
-      // dashboard.
-      router.replace('/login?registered=1');
+      const { user } = await authApi.register({
+        email: parsed.data.email,
+        password: parsed.data.password,
+      });
+      setAuthenticated(user);
+      router.replace('/dashboard');
+      router.refresh();
     } catch (error) {
       setFormError(messageForError(error));
     } finally {

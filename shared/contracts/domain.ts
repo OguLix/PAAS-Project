@@ -184,8 +184,8 @@ export const applicationDeploymentConfigSchema = z.object({
     .min(1)
     .max(255)
     .regex(/^\/(?!\/)/, 'Health check path must start with a single slash'),
-  cpuCores: z.number().min(0.1).max(2),
-  memoryMb: z.number().int().min(64).max(2048),
+  cpuCores: z.number().min(0.1).max(1.5),
+  memoryMb: z.number().int().min(64).max(1024),
   pidsLimit: z.number().int().min(16).max(512),
 });
 
@@ -291,10 +291,10 @@ export const environmentVariableInputSchema = z
   })
   .strict();
 
-/** Defaults match docs/design/decisions.md section 9. */
+/** Defaults match docs/design/decisions.md section 9; ceilings protect 2 GiB runtime VMs. */
 export const resourceLimitsSchema = z.object({
-  cpuCores: z.number().min(0.1).max(2).default(0.5),
-  memoryMb: z.number().int().min(64).max(2048).default(512),
+  cpuCores: z.number().min(0.1).max(1.5).default(0.5),
+  memoryMb: z.number().int().min(64).max(1024).default(512),
   pidsLimit: z.number().int().min(16).max(512).default(100),
 });
 

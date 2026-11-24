@@ -68,6 +68,7 @@ export type BuildRequest = {
   commitSha: string | null;
   branch: string;
   dockerfilePath: string;
+  buildContext: string;
   imageReference: string;
   timeoutSeconds: number;
 };

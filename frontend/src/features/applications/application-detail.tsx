@@ -1,10 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { ApplicationResponse } from '@ogulix/shared';
-import { deployInputSchema } from '@ogulix/shared';
+import {
+  createDomainInputSchema,
+  deployInputSchema,
+  environmentVariableInputSchema,
+  environmentVariableKeySchema,
+  type ApplicationResponse,
+  type DomainResponse,
+  type EnvironmentVariableSummary,
+} from '@ogulix/shared';
 import { EmptyState } from '@/components/feedback/empty-state';
 import { ErrorState } from '@/components/feedback/error-state';
 import { LoadingState } from '@/components/feedback/loading-state';
@@ -18,19 +25,35 @@ import { DeploymentStatus } from '@/features/deployments/deployment-status';
 import { messageForError } from '@/lib/errors';
 import { applicationsApi } from '@/services/applications.api';
 import type { DeploymentResponse } from '@/services/deployments.types';
+import { domainsApi } from '@/services/domains.api';
+import { envApi } from '@/services/env.api';
 
 export function ApplicationDetail({ applicationId }: { applicationId: string }) {
   const router = useRouter();
   const [application, setApplication] = useState<ApplicationResponse | null>(null);
   const [deployments, setDeployments] = useState<DeploymentResponse[]>([]);
+  const [domains, setDomains] = useState<DomainResponse[]>([]);
+  const [envVars, setEnvVars] = useState<EnvironmentVariableSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+
   const [branch, setBranch] = useState('');
   const [commitSha, setCommitSha] = useState('');
   const [deployError, setDeployError] = useState<string | null>(null);
   const [deploying, setDeploying] = useState(false);
+  const deployIdempotencyKey = useRef<string | null>(null);
+
+  const [hostname, setHostname] = useState('');
+  const [domainError, setDomainError] = useState<string | null>(null);
+  const [domainPending, setDomainPending] = useState(false);
+
+  const [envKey, setEnvKey] = useState('');
+  const [envValue, setEnvValue] = useState('');
+  const [envError, setEnvError] = useState<string | null>(null);
+  const [envPending, setEnvPending] = useState(false);
+
   const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const loadApplication = useCallback(async () => {
@@ -38,11 +61,31 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
     setPageError(null);
     setHistoryError(null);
     try {
-      setApplication(await applicationsApi.get(applicationId));
-      try {
-        setDeployments(await applicationsApi.deployments(applicationId));
-      } catch (error) {
-        setHistoryError(messageForError(error));
+      const app = await applicationsApi.get(applicationId);
+      setApplication(app);
+
+      const [deploymentsResult, domainsResult, envResult] = await Promise.allSettled([
+        applicationsApi.deployments(applicationId),
+        domainsApi.list(applicationId),
+        envApi.list(applicationId),
+      ]);
+
+      if (deploymentsResult.status === 'fulfilled') {
+        setDeployments(deploymentsResult.value);
+      } else {
+        setHistoryError(messageForError(deploymentsResult.reason));
+      }
+
+      if (domainsResult.status === 'fulfilled') {
+        setDomains(domainsResult.value);
+      } else {
+        setDomainError(messageForError(domainsResult.reason));
+      }
+
+      if (envResult.status === 'fulfilled') {
+        setEnvVars(envResult.value);
+      } else {
+        setEnvError(messageForError(envResult.reason));
       }
     } catch (error) {
       setPageError(messageForError(error));
@@ -54,6 +97,10 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
   useEffect(() => {
     void loadApplication();
   }, [loadApplication]);
+
+  function resetDeployKey() {
+    deployIdempotencyKey.current = null;
+  }
 
   async function handleDeploy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -67,14 +114,95 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
       return;
     }
 
+    deployIdempotencyKey.current ??= crypto.randomUUID();
     setDeploying(true);
     try {
-      const deployment = await applicationsApi.deploy(applicationId, parsed.data);
+      const deployment = await applicationsApi.deploy(
+        applicationId,
+        parsed.data,
+        deployIdempotencyKey.current,
+      );
+      resetDeployKey();
       router.push(`/deployments/${encodeURIComponent(deployment.id)}`);
     } catch (error) {
       setDeployError(messageForError(error));
     } finally {
       setDeploying(false);
+    }
+  }
+
+  async function handleAddDomain(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setDomainError(null);
+    const parsed = createDomainInputSchema.safeParse({ hostname });
+    if (!parsed.success) {
+      setDomainError(parsed.error.issues[0]?.message ?? 'Enter a valid apps.ogulix.tech hostname.');
+      return;
+    }
+
+    setDomainPending(true);
+    try {
+      const created = await domainsApi.create(applicationId, parsed.data);
+      setDomains((current) => [...current, created]);
+      setHostname('');
+    } catch (error) {
+      setDomainError(messageForError(error));
+    } finally {
+      setDomainPending(false);
+    }
+  }
+
+  async function handleDisableDomain(domainId: string) {
+    setDomainError(null);
+    try {
+      const disabled = await domainsApi.disable(domainId);
+      setDomains((current) => current.map((item) => (item.id === domainId ? disabled : item)));
+    } catch (error) {
+      setDomainError(messageForError(error));
+    }
+  }
+
+  async function handleSaveEnv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setEnvError(null);
+
+    const parsedKey = environmentVariableKeySchema.safeParse(envKey.trim());
+    if (!parsedKey.success) {
+      setEnvError(parsedKey.error.issues[0]?.message ?? 'Enter a valid CONSTANT_CASE key.');
+      return;
+    }
+    const parsedInput = environmentVariableInputSchema.safeParse({
+      value: envValue,
+      isSecret: true,
+    });
+    if (!parsedInput.success) {
+      setEnvError(parsedInput.error.issues[0]?.message ?? 'Invalid environment variable value.');
+      return;
+    }
+
+    setEnvPending(true);
+    try {
+      const saved = await envApi.upsert(applicationId, parsedKey.data, parsedInput.data);
+      setEnvVars((current) => {
+        const filtered = current.filter((item) => item.key !== saved.key);
+        return [...filtered, saved].sort((left, right) => left.key.localeCompare(right.key));
+      });
+      setEnvKey('');
+      setEnvValue('');
+    } catch (error) {
+      setEnvError(messageForError(error));
+    } finally {
+      setEnvPending(false);
+    }
+  }
+
+  async function handleDeleteEnv(key: string) {
+    setEnvError(null);
+    try {
+      await envApi.remove(applicationId, key);
+      setEnvVars((current) => current.filter((item) => item.key !== key));
+    } catch (error) {
+      setEnvError(messageForError(error));
     }
   }
 
@@ -162,7 +290,10 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
                 <Input
                   id="deploy-branch"
                   value={branch}
-                  onChange={(event) => setBranch(event.target.value)}
+                  onChange={(event) => {
+                    setBranch(event.target.value);
+                    resetDeployKey();
+                  }}
                   maxLength={255}
                 />
               </Field>
@@ -174,7 +305,10 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
                 <Input
                   id="deploy-commit"
                   value={commitSha}
-                  onChange={(event) => setCommitSha(event.target.value)}
+                  onChange={(event) => {
+                    setCommitSha(event.target.value);
+                    resetDeployKey();
+                  }}
                   maxLength={64}
                 />
               </Field>
@@ -187,16 +321,162 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
 
         <Card>
           <CardHeader>
-            <CardTitle>Monitoring</CardTitle>
+            <CardTitle>Runtime configuration</CardTitle>
             <CardDescription>
-              Runtime metrics are not available in the current API contract.
+              Build and resource limits applied to every container deployment.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <EmptyState
-              title="No telemetry available"
-              description="CPU, memory, and request metrics will appear when a monitoring endpoint is implemented. No sample values are shown."
-            />
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt className="text-xs text-muted">Dockerfile</dt>
+                <dd className="mt-1 font-mono text-ink">{application.dockerfilePath}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Build context</dt>
+                <dd className="mt-1 font-mono text-ink">{application.buildContext}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Internal port</dt>
+                <dd className="mt-1 font-mono text-ink">{application.internalPort}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Health check</dt>
+                <dd className="mt-1 font-mono text-ink">{application.healthCheckPath}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Limits</dt>
+                <dd className="mt-1 font-mono text-ink">
+                  {application.cpuCores} CPU · {application.memoryMb} MiB · {application.pidsLimit}{' '}
+                  PIDs
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Live deployment</dt>
+                <dd className="mt-1 font-mono text-ink">
+                  {application.currentDeploymentId
+                    ? application.currentDeploymentId.slice(0, 8)
+                    : 'None'}
+                </dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Domains</CardTitle>
+            <CardDescription>Associate a single subdomain under apps.ogulix.tech.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {domainError ? <Alert tone="error">{domainError}</Alert> : null}
+            <form
+              onSubmit={handleAddDomain}
+              className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            >
+              <div className="flex-1">
+                <Field id="domain-hostname" label="Hostname">
+                  <Input
+                    id="domain-hostname"
+                    value={hostname}
+                    onChange={(event) => setHostname(event.target.value)}
+                    placeholder="demo.apps.ogulix.tech"
+                    maxLength={253}
+                  />
+                </Field>
+              </div>
+              <Button type="submit" size="sm" disabled={domainPending}>
+                {domainPending ? 'Adding…' : 'Add domain'}
+              </Button>
+            </form>
+            {domains.length === 0 ? (
+              <p className="text-sm text-muted">No domains associated yet.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {domains.map((domain) => (
+                  <li key={domain.id} className="flex items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-sm text-ink">{domain.hostname}</p>
+                      <p className="text-xs text-muted">
+                        {domain.status}
+                        {domain.isPrimary ? ' · Primary' : ''}
+                      </p>
+                    </div>
+                    {domain.status !== 'DISABLED' ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleDisableDomain(domain.id)}
+                      >
+                        Disable
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Environment variables</CardTitle>
+            <CardDescription>
+              Values are encrypted at rest and never returned after saving.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {envError ? <Alert tone="error">{envError}</Alert> : null}
+            <form onSubmit={handleSaveEnv} className="flex flex-col gap-3">
+              <Field id="env-key" label="Key (CONSTANT_CASE)">
+                <Input
+                  id="env-key"
+                  value={envKey}
+                  onChange={(event) => setEnvKey(event.target.value)}
+                  placeholder="API_TOKEN"
+                  maxLength={128}
+                />
+              </Field>
+              <Field id="env-value" label="Secret value">
+                <Input
+                  id="env-value"
+                  type="password"
+                  value={envValue}
+                  onChange={(event) => setEnvValue(event.target.value)}
+                  autoComplete="new-password"
+                />
+              </Field>
+              <div>
+                <Button type="submit" size="sm" disabled={envPending}>
+                  {envPending ? 'Saving…' : 'Save variable'}
+                </Button>
+              </div>
+            </form>
+            {envVars.length === 0 ? (
+              <p className="text-sm text-muted">No environment variables configured.</p>
+            ) : (
+              <ul className="divide-y divide-line">
+                {envVars.map((variable) => (
+                  <li key={variable.key} className="flex items-center justify-between gap-3 py-2.5">
+                    <div>
+                      <p className="font-mono text-sm text-ink">{variable.key}</p>
+                      <p className="text-xs text-muted">
+                        {variable.isSecret ? 'Encrypted secret' : 'Encrypted value'}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void handleDeleteEnv(variable.key)}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -232,6 +512,7 @@ export function ApplicationDetail({ applicationId }: { applicationId: string }) 
                     </span>
                     <span className="mt-1 block text-xs text-muted">
                       {new Date(deployment.createdAt).toLocaleString()}
+                      {deployment.branch ? ` · ${deployment.branch}` : ''}
                       {deployment.commitSha ? ` · ${deployment.commitSha.slice(0, 12)}` : ''}
                     </span>
                   </span>

@@ -11,5 +11,5 @@ export const paginationQuerySchema = z.object({
 
 export const logQuerySchema = z.object({
   after: z.coerce.number().int().min(0).optional(),
-  limit: z.coerce.number().int().min(1).max(500).default(200),
+  limit: z.coerce.number().int().min(1).max(100).default(100),
 });

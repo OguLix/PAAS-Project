@@ -14,6 +14,25 @@ export const DEPLOYMENT_ERROR_CODES = [
 
 export type DeploymentErrorCode = (typeof DEPLOYMENT_ERROR_CODES)[number];
 
+/** Sanitized, user-facing diagnostics mapped from stable deployment error codes. */
+export const DEPLOYMENT_ERROR_MESSAGES: Record<DeploymentErrorCode, string> = {
+  BUILD_FAILED: 'Container image build failed. Check the build logs for details.',
+  BUILD_TIMEOUT: 'Container image build exceeded the allowed time limit.',
+  NODE_UNAVAILABLE: 'No healthy runtime node with enough capacity is currently available.',
+  CONTAINER_START_FAILED: 'The application container could not be started on the runtime node.',
+  HEALTH_CHECK_FAILED: 'The application did not pass its HTTP health check in time.',
+  ROUTE_FAILED: 'The reverse proxy route could not be updated for this deployment.',
+  CANCELLED_BY_USER: 'Deployment was cancelled before execution began.',
+  INTERNAL_ERROR: 'An internal control-plane error interrupted this deployment.',
+};
+
+export function getDeploymentErrorMessage(code: string | null | undefined): string | null {
+  if (!code || !isDeploymentErrorCode(code)) {
+    return null;
+  }
+  return DEPLOYMENT_ERROR_MESSAGES[code];
+}
+
 export type DeploymentResponse = {
   id: string;
   applicationId: string;

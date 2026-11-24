@@ -3,10 +3,7 @@ import { resolve } from 'node:path';
 import dotenv from 'dotenv';
 import { defineConfig } from 'prisma/config';
 
-const envPaths = [
-  resolve(process.cwd(), '.env'),
-  resolve(process.cwd(), '..', '.env'),
-];
+const envPaths = [resolve(process.cwd(), '.env'), resolve(process.cwd(), '..', '.env')];
 
 for (const envPath of envPaths) {
   if (existsSync(envPath)) {

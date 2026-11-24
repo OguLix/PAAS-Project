@@ -22,9 +22,10 @@ x-control-plane-environment: &control-plane-environment
   # HTTP on localhost is only accepted while NODE_ENV is not `production`
   # (see backend/src/config/env.ts). A real deployment must set NODE_ENV=production
   # and an HTTPS APP_ORIGIN.
-  NODE_ENV: development
+  NODE_ENV: ${NODE_ENV:-development}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   RUNTIME_MODE: ${RUNTIME_MODE:-mock}
+  TRUST_PROXY: ${TRUST_PROXY:-0}
   APP_ORIGIN: ${APP_ORIGIN:-http://localhost:3000}
   # Container-to-container hostnames. Never `localhost`: inside the network each
   # service talks to the other by service name.
@@ -40,6 +41,8 @@ services:
   mariadb:
     image: mariadb:11.4
     restart: unless-stopped
+    mem_limit: 512m
+    pids_limit: 256
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -62,6 +65,8 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
+    mem_limit: 128m
+    pids_limit: 128
     # BullMQ needs `noeviction`. AOF (`appendonly yes`, `appendfsync everysec`)
     # keeps queued jobs across container recreation; RDB snapshots are disabled
     # so there is a single persistence format to reason about.
@@ -109,6 +114,8 @@ services:
       target: backend
     image: ogulix-control-plane-backend:local
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
     environment:
       <<: *control-plane-environment
       API_PORT: 3001
@@ -145,6 +152,8 @@ services:
       target: worker
     image: ogulix-control-plane-worker:local
     restart: unless-stopped
+    mem_limit: 256m
+    pids_limit: 128
     environment:
       <<: *control-plane-environment
       QUEUE_NAME: ${QUEUE_NAME:-deployments}
@@ -183,6 +192,8 @@ services:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001/api/v1}
     image: ogulix-control-plane-frontend:local
     restart: unless-stopped
+    mem_limit: 384m
+    pids_limit: 128
     ports:
       - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000'
     depends_on:

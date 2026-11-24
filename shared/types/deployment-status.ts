@@ -21,6 +21,18 @@ export const DEPLOYMENT_STATUSES = [
 
 export type DeploymentStatus = (typeof DEPLOYMENT_STATUSES)[number];
 
+/** Statuses that block application archiving (docs/design/decisions.md B7d). */
+export const ACTIVE_DEPLOYMENT_STATUSES = [
+  'QUEUED',
+  'PREPARING',
+  'BUILDING',
+  'STARTING',
+  'HEALTH_CHECKING',
+  'RUNNING',
+] as const satisfies readonly DeploymentStatus[];
+
+export type ActiveDeploymentStatus = (typeof ACTIVE_DEPLOYMENT_STATUSES)[number];
+
 /** Terminal for an individual deployment attempt. A redeploy is a new attempt. */
 export const TERMINAL_DEPLOYMENT_STATUSES = [
   'RUNNING',
@@ -64,6 +76,10 @@ export const DEPLOYMENT_TRANSITIONS: Record<DeploymentStatus, readonly Deploymen
 
 export function isDeploymentStatus(value: string): value is DeploymentStatus {
   return (DEPLOYMENT_STATUSES as readonly string[]).includes(value);
+}
+
+export function isActiveDeploymentStatus(status: DeploymentStatus): boolean {
+  return (ACTIVE_DEPLOYMENT_STATUSES as readonly DeploymentStatus[]).includes(status);
 }
 
 export function isTerminalDeploymentStatus(status: DeploymentStatus): boolean {
